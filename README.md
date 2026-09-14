@@ -15,6 +15,8 @@
 需要 Go 1.26、Node.js 22.12+ 和 npm。
 
 ```sh
+git clone https://github.com/wizcheu/v2echo-notifier.git
+cd v2echo-notifier
 make build
 ./bin/notifier
 ```
