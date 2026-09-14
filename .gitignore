@@ -1,0 +1,15 @@
+/data/
+/bin/
+/web/node_modules/
+/web/dist/*
+!/web/dist/.gitkeep
+.env
+.env.*
+!.env.example
+/.DS_Store
+/compose.override.*
+/docker-compose.override.*
+*.tsbuildinfo
+*.db
+*.db-shm
+*.db-wal
