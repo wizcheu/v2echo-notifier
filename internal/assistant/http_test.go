@@ -22,10 +22,7 @@ func TestManagementAuthenticationAndSecretRedaction(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(accounts.Close)
-	id, err := accounts.Add("fake-test-token")
-	if err != nil {
-		t.Fatal(err)
-	}
+	id := seedTestAccount(t, accounts, "fake-test-token", "A2=synthetic")
 	server, err := NewServer(accounts, fstest.MapFS{"index.html": {Data: []byte("<!doctype html><title>test</title>")}}, dir)
 	if err != nil {
 		t.Fatal(err)
@@ -72,6 +69,11 @@ func TestManagementAuthenticationAndSecretRedaction(t *testing.T) {
 	if len(cookies) != 1 || !cookies[0].HttpOnly || cookies[0].SameSite != http.SameSiteStrictMode {
 		t.Fatal("unsafe session cookie")
 	}
+	for _, payload := range []string{`{"api_token":"only-token"}`, `{"cookie":"A2=only-cookie"}`, `{"api_token":"token","cookie":"wrong=value"}`} {
+		if missing := request("POST", "/api/accounts", payload, "", cookies[0]); missing.Code != 400 {
+			t.Fatal("account API accepted missing credentials")
+		}
+	}
 	res := request("GET", "/api/accounts/"+id+"/status", "", "", cookies[0])
 	if res.Code != 200 || strings.Contains(res.Body.String(), "fake-test-token") {
 		t.Fatal("status leaked secrets or failed")
@@ -93,7 +95,8 @@ func TestManagementAuthenticationAndSecretRedaction(t *testing.T) {
 	if proxyStatus.Code != 200 || strings.Contains(proxyStatus.Body.String(), "proxy-login") || strings.Contains(proxyStatus.Body.String(), "proxy-secret") || !strings.Contains(proxyStatus.Body.String(), `"proxy_address":"http://proxy.example:8080"`) {
 		t.Fatal("proxy status redaction failed")
 	}
-	added := request("POST", "/api/accounts", `{"api_token":"second-secret"}`, "", cookies[0])
+	mockAccountVerification(t, accounts, 8, "second")
+	added := request("POST", "/api/accounts", `{"api_token":"second-secret","cookie":"A2=synthetic"}`, "", cookies[0])
 	var second struct {
 		ID string `json:"id"`
 	}
@@ -201,10 +204,7 @@ func TestPushTestManagementRoutesAndFixedService(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(accounts.Close)
-	id, err := accounts.Add("synthetic-pat")
-	if err != nil {
-		t.Fatal(err)
-	}
+	id := seedTestAccount(t, accounts, "synthetic-pat", "A2=synthetic")
 	e, _ := accounts.Get(id)
 	cfg := Config{APIToken: "synthetic-pat", Enabled: true, IntervalSeconds: 180, RelayURL: PushServiceURL, RelayToken: "synthetic-sender"}
 	st := State{AccountID: 7, Username: "tester", Verified: true, InitialPairingDone: true}

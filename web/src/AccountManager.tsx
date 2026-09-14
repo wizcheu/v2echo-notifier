@@ -1,0 +1,48 @@
+import { useState } from 'react'
+
+export type Account = {
+  id: string; username: string; member_id: number; enabled: boolean; verified: boolean; blocked: boolean
+  cookie_configured: boolean; cookie_verified: boolean; token_issue: string; cookie_issue: string; last_error: string
+}
+
+export function TokenHelp() {
+  return <p className="caption">前往 <a href="https://v2ex.com/settings/tokens" target="_blank" rel="noopener noreferrer">V2EX 生成 API Token ↗</a>，Scope 选择 <strong>Everything</strong>，有效期建议选长一些，例如 <strong>180 天</strong>。Token 与 Cookie 必须属于同一个账号。</p>
+}
+
+export default function AccountManager({ accounts, error, onAdd, onOpen, onRemove, onBack }: {
+  accounts: Account[]; error: string; onAdd: () => void; onOpen: (id: string) => void
+  onRemove: (id: string) => Promise<void>; onBack: () => void
+}) {
+  const [confirm, setConfirm] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [failure, setFailure] = useState('')
+  async function remove(id: string) {
+    setBusy(true); setFailure('')
+    try { await onRemove(id); setConfirm('') }
+    catch (e) { setFailure(e instanceof Error ? e.message : '移除失败，请重试。') }
+    finally { setBusy(false) }
+  }
+  return <main className="account-manager">
+    <div className="wordmark">V2Echo <span>通知助手</span></div>
+    <header className="page-header"><div><h1>账号管理</h1><p className="page-description">已添加 {accounts.length} / 20 个账号。查看凭据状态，更新连接或移除旧账号。</p></div>
+      <div className="account-actions">{accounts.length > 0 && <button disabled={busy} onClick={onBack}>返回工作台</button>}<button className="primary" disabled={busy || accounts.length >= 20} onClick={onAdd}>添加账号</button></div>
+    </header>
+    {(failure || error) && <p className="notice error" role="alert">{failure || error}</p>}
+    {!accounts.length && <section className="panel"><h2>还没有账号</h2><p className="muted">准备同账号的 API Token 和网页 Cookie，即可添加并开始验证。</p><TokenHelp /></section>}
+    <div className="account-list">{accounts.map(account => <section className="panel" key={account.id}>
+      <div className="section-heading"><h2>{account.username ? `@${account.username}` : `待验证账号 · ${account.id.slice(0, 6)}`}</h2><span className={`status-pill ${account.blocked ? 'warning' : !account.enabled ? 'neutral' : ''}`}>{account.blocked ? '需要处理' : account.enabled ? '已启用' : '已暂停'}</span></div>
+      <dl className="details">
+        <div><dt>API Token</dt><dd>{account.token_issue ? '需要更新' : account.verified ? '已验证' : '等待验证'}</dd></div>
+        <div><dt>网页 Cookie</dt><dd>{!account.cookie_configured ? '需要补充' : account.cookie_issue ? '需要更新' : account.cookie_verified ? '已验证' : '等待验证'}</dd></div>
+      </dl>
+      {account.token_issue && <p className="notice error">{account.token_issue}</p>}
+      {account.cookie_issue && <p className="notice error">{account.cookie_issue}</p>}
+      {account.last_error && account.last_error !== account.token_issue && account.last_error !== account.cookie_issue && <p className="caption">{account.last_error}</p>}
+      {confirm === account.id ? <div className="account-delete-confirm">
+        <p>确认移除 {account.username ? `@${account.username}` : '此待验证账号'}？将删除该账号在此服务器保存的凭据、通知历史和推送队列，不会删除 V2EX 网站账号。</p>
+        <div className="account-actions"><button className="danger-button" disabled={busy} onClick={() => void remove(account.id)}>{busy ? '正在移除…' : '确认移除'}</button><button disabled={busy} onClick={() => setConfirm('')}>取消</button></div>
+      </div> : <div className="account-actions"><button disabled={busy} onClick={() => onOpen(account.id)}>{account.token_issue || account.cookie_issue || !account.cookie_configured ? '更新凭据' : '连接与设置'}</button><button className="danger-button" disabled={busy} onClick={() => { setFailure(''); setConfirm(account.id) }}>移除账号</button></div>}
+    </section>)}</div>
+    <p className="caption">凭据状态在后台检查后更新。暂停同步时也会暂停凭据检查；网络故障或访问挑战不会直接判定为过期。</p>
+  </main>
+}

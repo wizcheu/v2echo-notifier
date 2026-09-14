@@ -17,13 +17,13 @@ func webPage(username string, count int) string {
 	return fmt.Sprintf(`<html><a class="top" href="/">首页</a><a class="top" href="/member/%s">本人</a><a href="/notifications" class="fade">%d 未读提醒</a><a href="/member/other">帖子作者</a></html>`, username, count)
 }
 func TestWebUnreadOnlyAcceptsAuthenticatedSameAccountAndCount(t *testing.T) {
-	for _, source := range []string{webPage("tester", 3), strings.ReplaceAll(webPage("TESTER", 3), `href="/`, `href="https://www.v2ex.com/`), strings.ReplaceAll(webPage("tester", 3), "未读提醒", "unread")} {
+	for _, source := range []string{webPage("tester", 3), strings.ReplaceAll(webPage("tester", 3), `href="/`, `href="https://www.v2ex.com/`), strings.ReplaceAll(webPage("tester", 3), "未读提醒", "unread")} {
 		if count, err := parseWebUnread(source, "tester"); err != nil || count != 3 {
 			t.Fatal(count, err)
 		}
 	}
 	for _, source := range []string{
-		webPage("other", 3), `<a href="/member/tester">作者</a><a href="/notifications">3 unread</a>`,
+		webPage("other", 3), webPage("TESTER", 3), `<a href="/member/tester">作者</a><a href="/notifications">3 unread</a>`,
 		strings.ReplaceAll(webPage("tester", 3), "3 未读提醒", "没有有效计数"),
 		strings.ReplaceAll(webPage("tester", 3), `href="/member/tester"`, `href="https://evil.example/member/tester"`),
 		webPage("tester", 3) + `<a href="/notifications">4 unread</a>`,

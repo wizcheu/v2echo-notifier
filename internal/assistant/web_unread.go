@@ -59,6 +59,9 @@ func (e *Engine) readWebUnread(ctx context.Context, cookie, username string) (We
 		return WebUnreadSnapshot{}, errors.New("无法读取 V2EX 首页，请检查服务器网络后重试")
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == 401 || ((resp.StatusCode == 301 || resp.StatusCode == 302 || resp.StatusCode == 303) && loginRedirect(resp.Header.Get("Location"))) {
+		return WebUnreadSnapshot{}, &webRequestError{message: "Cookie 登录已失效，请更新同账号的 Cookie", status: resp.StatusCode, auth: true}
+	}
 	if resp.StatusCode != 200 || strings.EqualFold(resp.Header.Get("cf-mitigated"), "challenge") {
 		return WebUnreadSnapshot{}, &webRequestError{message: "V2EX 首页未通过登录或访问验证，请更新 Cookie 或检查服务器出口后重试", status: resp.StatusCode, retry: retryAfter(resp.Header, time.Now()), auth: resp.StatusCode == 401}
 	}
@@ -68,7 +71,10 @@ func (e *Engine) readWebUnread(ctx context.Context, cookie, username string) (We
 	}
 	count, err := parseWebUnread(string(raw), username)
 	if err != nil {
-		err = &webRequestError{message: err.Error(), auth: true}
+		var problem *webRequestError
+		if !errors.As(err, &problem) {
+			err = &webRequestError{message: err.Error()}
+		}
 	}
 	return WebUnreadSnapshot{Count: count, ObservedAt: time.Now().UTC()}, err
 }
@@ -82,6 +88,7 @@ func parseWebUnread(source, expected string) (int, error) {
 		return 0, errors.New("无法解析 V2EX 首页")
 	}
 	actual, count, invalid := "", -1, false
+	signIn := false
 	var visit func(*html.Node)
 	visit = func(n *html.Node) {
 		if n.Type == html.ElementNode && n.Data == "a" {
@@ -103,10 +110,13 @@ func parseWebUnread(source, expected string) (int, error) {
 						top = true
 					}
 				}
+				if top && u.Path == "/signin" {
+					signIn = true
+				}
 				if top && strings.HasPrefix(u.Path, "/member/") {
 					name := strings.TrimPrefix(u.Path, "/member/")
 					if webUsername.MatchString(name) {
-						if actual != "" && !strings.EqualFold(actual, name) {
+						if actual != "" && actual != name {
 							invalid = true
 						}
 						actual = name
@@ -140,14 +150,22 @@ func parseWebUnread(source, expected string) (int, error) {
 		}
 	}
 	visit(doc)
-	if actual == "" || invalid {
-		return 0, errors.New("Cookie 登录状态无法确认，请重新复制已登录账号的 Cookie")
+	if actual == "" && signIn {
+		return 0, &webRequestError{message: "Cookie 登录已失效，请更新同账号的 Cookie", auth: true}
 	}
-	if !strings.EqualFold(actual, expected) {
-		return 0, errors.New("Cookie 与当前配置不属于同一个 V2EX 账号")
+	if actual == "" || invalid {
+		return 0, errors.New("暂时无法确认网页登录状态，请检查网络或页面访问验证后重试")
+	}
+	if actual != expected {
+		return 0, &webRequestError{message: "API Token 与 Cookie 的用户名不完全一致（区分大小写），请使用同一 V2EX 账号的凭据", auth: true}
 	}
 	if count < 0 {
 		return 0, errors.New("无法读取未读数量，未将缺失计数当作零；请检查 Cookie 或页面访问状态")
 	}
 	return count, nil
+}
+
+func loginRedirect(location string) bool {
+	u, err := url.Parse(location)
+	return err == nil && u.User == nil && (u.Host == "" || strings.EqualFold(u.Host, "www.v2ex.com") || strings.EqualFold(u.Host, "v2ex.com")) && u.Path == "/signin"
 }

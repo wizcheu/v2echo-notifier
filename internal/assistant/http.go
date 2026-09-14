@@ -81,13 +81,15 @@ func (s *Server) Handler() http.Handler {
 	}))
 	mux.HandleFunc("POST /api/accounts", s.authorized(func(w http.ResponseWriter, r *http.Request) {
 		var input struct {
-			Token string `json:"api_token"`
+			Token  string `json:"api_token"`
+			Cookie string `json:"cookie"`
+			ProxyConfig
 		}
 		if err := decode(w, r, &input); err != nil {
 			fail(w, 400, "账号配置格式不正确")
 			return
 		}
-		id, err := s.Accounts.Add(input.Token)
+		id, err := s.Accounts.Add(r.Context(), input.Token, input.Cookie, input.ProxyConfig)
 		if err != nil {
 			fail(w, 400, err.Error())
 			return
@@ -102,6 +104,16 @@ func (s *Server) Handler() http.Handler {
 		writeJSON(w, 200, map[string]bool{"removed": true})
 	}))
 	mux.HandleFunc("GET /api/accounts/{accountID}/status", s.account(s.status))
+	mux.HandleFunc("GET /api/accounts/{accountID}/config", s.account(func(e *Engine, w http.ResponseWriter, r *http.Request) {
+		cfg, err := e.Store.Config()
+		if err != nil {
+			fail(w, 500, "无法读取已保存配置")
+			return
+		}
+		// Only the authenticated settings view requests decrypted credentials.
+		// Periodic status responses continue returning configuration flags.
+		writeJSON(w, 200, cfg)
+	}))
 	mux.HandleFunc("GET /api/accounts/{accountID}/deliveries", s.account(s.deliveryHistory))
 	mux.HandleFunc("POST /api/accounts/{accountID}/push-test", s.account(s.queuePushTest))
 	mux.HandleFunc("PUT /api/accounts/{accountID}/config", s.account(func(e *Engine, w http.ResponseWriter, r *http.Request) {
@@ -199,7 +211,8 @@ func (s *Server) Handler() http.Handler {
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			w.Header().Set("Cache-Control", "no-store")
-			if r.Method != "GET" && r.Method != "HEAD" {
+			readsConfig := (r.Method == "GET" || r.Method == "HEAD") && strings.HasSuffix(r.URL.Path, "/config")
+			if readsConfig || (r.Method != "GET" && r.Method != "HEAD") {
 				if r.Header.Get("X-V2Echo-Request") != "1" {
 					fail(w, 403, "缺少请求校验头")
 					return

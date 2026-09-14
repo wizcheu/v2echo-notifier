@@ -233,3 +233,26 @@ summary:hover { text-decoration:underline; text-underline-offset:4px; }
 
 .test-actions { display:flex; align-items:center; flex-wrap:wrap; gap:16px; margin-top:24px; }
 .test-notice { margin:20px 0 0; }
+
+.secret-field label { margin-bottom:8px; }
+.secret-field-controls { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:start; gap:8px; }
+.secret-field-actions { display:flex; gap:8px; }
+.secret-field-actions button { min-height:46px; padding-inline:12px; white-space:nowrap; }
+.secret-field-feedback:empty { display:none; }
+.clipboard-copy-target { position:fixed; left:-10000px; top:0; width:1px; height:1px; }
+@media(max-width:480px) {
+  .secret-field-controls { grid-template-columns:minmax(0,1fr); }
+  .secret-field-actions { justify-content:flex-end; }
+}
+
+.account-manager { width:min(100%,1040px); margin:0 auto; padding:32px 24px 64px; }
+.account-manager>.wordmark { margin-bottom:32px; }
+.account-actions { display:flex; flex-wrap:wrap; align-items:center; gap:12px; }
+.account-list .details { margin-bottom:20px; }
+.account-list .panel { margin-bottom:16px; }
+.account-delete-confirm { border-top:1px solid var(--border); padding-top:20px; }
+.account-delete-confirm p { font-size:14px; }
+.credential-checks { margin-top:24px; }
+.notice>div { min-width:0; }
+.notice>div>p { margin-bottom:0; }
+@media(max-width:600px) { .account-manager .page-header { flex-direction:column; } }

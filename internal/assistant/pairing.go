@@ -121,6 +121,8 @@ func (e *Engine) Pair(ctx context.Context, relayURL, code, cookie string) error 
 	cfg.RelayURL, cfg.RelayToken = relayURL, token
 
 	if unread != nil {
+		st.CookieIssue = ""
+		st.CookieCheckedAt = unread.ObservedAt
 		st.HasWebUnread = true
 		st.WebUnreadCount, st.WebObservedAt = unread.Count, unread.ObservedAt
 		st.InitialPairingDone = true

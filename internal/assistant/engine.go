@@ -101,10 +101,20 @@ func (e *Engine) configure(c Config, preservePairing bool) error {
 		return err
 	}
 	if c.APIToken != old.APIToken {
+		st.TokenIssue = ""
+		st.TokenCheckedAt = time.Time{}
+		st.NextTokenCheck = time.Time{}
 		st.Verified = false
 		st.AuthBlocked = false
 		st.LastError = ""
 		st.Failures = 0
+	}
+	if c.Cookie != old.Cookie {
+		st.CookieIssue = ""
+		st.CookieCheckedAt = time.Time{}
+		if st.TokenIssue == "" {
+			st.LastError = ""
+		}
 	}
 	st.NextCheck = time.Time{}
 	changed := c.RelayToken != old.RelayToken || c.RelayURL != old.RelayURL
@@ -151,7 +161,19 @@ func (e *Engine) Step(ctx context.Context, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	if cfg.Cookie != "" && st.Verified {
+	if canReadWeb(cfg, st) {
+		if st.NextTokenCheck.IsZero() {
+			st.NextTokenCheck = now.Add(tokenCheckInterval)
+			if err := e.Store.SaveState(st); err != nil {
+				return err
+			}
+		}
+		if !st.AuthBlocked && !now.Before(st.NextTokenCheck) && !now.Before(st.NextAPI) {
+			handled, err := e.checkTokenLocked(ctx, cfg, &st, now)
+			if handled || err != nil {
+				return err
+			}
+		}
 		return e.stepHybridLocked(ctx, cfg, st, now)
 	}
 	if st.AuthBlocked || now.Before(st.NextAPI) || now.Before(st.NextCheck) {
@@ -203,6 +225,7 @@ func (e *Engine) Step(ctx context.Context, now time.Time) error {
 		st.AccountID = member.ID
 		st.Username = member.Username
 		st.Verified = true
+		st.tokenValid(now)
 		st.LastError = ""
 		st.Failures = 0
 		return e.Store.SaveState(st)
@@ -215,6 +238,7 @@ func (e *Engine) Step(ctx context.Context, now time.Time) error {
 	if err != nil {
 		return e.recordFailure(st, headers, err, now)
 	}
+	st.tokenValid(now)
 	for i, n := range page.Items {
 		if n.ID <= 0 || n.ForMemberID != st.AccountID || n.Created <= 0 {
 			return e.recordFailure(st, nil, errors.New("通知身份字段不匹配，未推进同步进度"), now)
@@ -280,10 +304,14 @@ func (e *Engine) recordFailure(st State, h http.Header, err error, now time.Time
 	var ae *APIError
 	var we *webRequestError
 	if errors.As(err, &we) {
+		if we.auth {
+			st.CookieIssue = we.message
+		}
 		st.NextWeb = maxTime(st.NextWeb, now.Add(max(3*time.Minute, we.retry)))
 	}
 	if errors.As(err, &ae) {
 		if ae.Expired {
+			st.TokenIssue = ae.Error()
 			st.Verified = false
 			st.AuthBlocked = true
 		}

@@ -49,7 +49,11 @@ func (v *V2EX) get(ctx context.Context, token, path string, target any) (http.He
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return resp.Header, &APIError{resp.StatusCode, resp.StatusCode == 401}
+		var failure struct {
+			Message string `json:"message"`
+		}
+		_ = json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&failure)
+		return resp.Header, &APIError{resp.StatusCode, resp.StatusCode == 401 || invalidTokenMessage(failure.Message)}
 	}
 	var envelope struct {
 		Success bool            `json:"success"`
@@ -60,8 +64,7 @@ func (v *V2EX) get(ctx context.Context, token, path string, target any) (http.He
 		return resp.Header, errors.New("V2EX 返回了无法解析的数据或验证页面")
 	}
 	if !envelope.Success {
-		m := strings.ToLower(envelope.Message)
-		return resp.Header, &APIError{resp.StatusCode, strings.Contains(m, "token") && (strings.Contains(m, "expired") || strings.Contains(m, "invalid"))}
+		return resp.Header, &APIError{resp.StatusCode, invalidTokenMessage(envelope.Message)}
 	}
 	if len(envelope.Result) == 0 || string(envelope.Result) == "null" {
 		return resp.Header, errors.New("V2EX 响应缺少 result，已停止本次同步")
@@ -83,6 +86,11 @@ func (v *V2EX) get(ctx context.Context, token, path string, target any) (http.He
 		}
 	}
 	return resp.Header, nil
+}
+
+func invalidTokenMessage(message string) bool {
+	m := strings.ToLower(message)
+	return strings.Contains(m, "token") && (strings.Contains(m, "expired") || strings.Contains(m, "invalid") || strings.Contains(m, "revoked"))
 }
 
 var pageRange = regexp.MustCompile(`^Notifications\s+(\d+)-(\d+)/(\d+)$`)

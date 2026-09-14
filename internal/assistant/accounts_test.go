@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -40,13 +41,57 @@ func testAccounts(t *testing.T) (*Accounts, string) {
 	t.Cleanup(a.Close)
 	return a, dir
 }
-func addTestAccount(t *testing.T, a *Accounts, pat string, memberID int64, username string) (string, *Engine) {
+
+// Seed legacy profiles without running the current onboarding workflow.
+func seedTestAccount(t *testing.T, a *Accounts, pat, cookie string) string {
 	t.Helper()
-	id, err := a.Add(pat)
+	id := fmt.Sprintf("%032x", len(a.engines)+1)
+	s, err := OpenStore(filepath.Join(a.dir, "accounts", id))
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := s.SaveConfig(Config{APIToken: pat, Cookie: cookie, Enabled: true, IntervalSeconds: 180}, State{Phase: "history", Page: 1}, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.DB.Exec("INSERT INTO managed_accounts(id) VALUES(?)", id); err != nil {
+		t.Fatal(err)
+	}
+	a.attach(id, NewEngine(s))
+	return id
+}
+
+func mockAccountVerification(t *testing.T, a *Accounts, id int64, username string) {
+	t.Helper()
+	a.verificationTransport = func(ProxyConfig) http.RoundTripper {
+		return transportFunc(func(r *http.Request) (*http.Response, error) {
+			if r.URL.Path == "/api/v2/member" {
+				if r.URL.String() != "https://www.v2ex.com/api/v2/member" || r.Method != "GET" || r.Header.Get("Cookie") != "" || r.Header.Get("Authorization") == "" {
+					t.Fatal("onboarding used the wrong API endpoint or credentials")
+				}
+				raw, _ := json.Marshal(map[string]any{"success": true, "result": Member{ID: id, Username: username}})
+				return response(200, string(raw)), nil
+			}
+			if r.URL.String() != "https://www.v2ex.com/" || r.Header.Get("Authorization") != "" || r.Header.Get("Cookie") == "" {
+				t.Fatal("onboarding leaked credentials or visited notifications")
+			}
+			return response(200, webPage(username, 3)), nil
+		})
+	}
+	// Each setup represents a fresh available budget window.
+	if _, err := a.DB.Exec("DELETE FROM api_budget"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func addTestAccount(t *testing.T, a *Accounts, pat string, memberID int64, username string) (string, *Engine) {
+	t.Helper()
+	id := seedTestAccount(t, a, pat, "A2=synthetic")
 	e, _ := a.Get(id)
+	cfg, _ := e.Store.Config()
+	cfg.Cookie = "" // Model a pre-existing API-only account.
+	if err := e.Store.SaveConfig(cfg, stateOf(t, e.Store), false); err != nil {
+		t.Fatal(err)
+	}
 	e.API.Client = &http.Client{Transport: transportFunc(func(r *http.Request) (*http.Response, error) {
 		if r.Header.Get("Authorization") != "Bearer "+pat {
 			t.Fatal("request used another account's token")

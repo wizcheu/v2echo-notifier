@@ -17,6 +17,11 @@ type Config struct {
 }
 
 type State struct {
+	TokenIssue         string    `json:"token_issue"`
+	CookieIssue        string    `json:"cookie_issue"`
+	TokenCheckedAt     time.Time `json:"token_checked_at"`
+	CookieCheckedAt    time.Time `json:"cookie_checked_at"`
+	NextTokenCheck     time.Time `json:"next_token_check"`
 	HasPushAPIID       bool      `json:"has_push_api_id"`
 	LastPushAPIID      int64     `json:"last_push_api_id"`
 	NextWeb            time.Time `json:"next_web"`

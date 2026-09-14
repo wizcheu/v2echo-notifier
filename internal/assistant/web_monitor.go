@@ -32,7 +32,7 @@ func normalizeWebCookie(cookie string) (string, error) {
 // snapshot queued for push, including changes caused by deleting the first row.
 // No local read-state inference or count arithmetic is performed.
 func (e *Engine) stepHybridLocked(ctx context.Context, cfg Config, st State, now time.Time) error {
-	if st.AuthBlocked || now.Before(st.NextCheck) || now.Before(st.NextWeb) {
+	if (st.AuthBlocked && st.TokenIssue == "") || st.CookieIssue != "" || now.Before(st.NextCheck) || now.Before(st.NextWeb) {
 		return nil
 	}
 	st.NextCheck = now.Add(time.Duration(cfg.IntervalSeconds) * time.Second)
@@ -45,11 +45,18 @@ func (e *Engine) stepHybridLocked(ctx context.Context, cfg Config, st State, now
 		st.NextWeb = maxTime(st.NextWeb, now.Add(max(3*time.Minute, backoff(st.Failures+1))))
 		return e.recordFailure(st, nil, err, now)
 	}
+	st.CookieIssue = ""
+	st.CookieCheckedAt = now
 	st.HasWebUnread = true
 	st.WebUnreadCount = web.Count
 	st.WebObservedAt = web.ObservedAt
 	st.Phase = "live"
 	st.Page = 1
+	if st.AuthBlocked {
+		// A previously verified identity can still check its Cookie while the
+		// Token needs replacement, but must not request API data or queue a push.
+		return e.Store.ImportPageAndUnread(st, nil, nil)
+	}
 	if web.Count == 0 {
 		st.LastError = ""
 		st.Failures = 0
@@ -84,6 +91,7 @@ func (e *Engine) stepHybridLocked(ctx context.Context, cfg Config, st State, now
 	if err != nil {
 		return e.recordFailure(st, headers, err, now)
 	}
+	st.tokenValid(now)
 	if len(page.Items) == 0 {
 		return e.recordFailure(st, nil, errors.New("网页有未读，但 API 暂未返回通知；保留推送基准等待下次检查"), now)
 	}

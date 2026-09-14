@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -22,21 +23,27 @@ var profileID = regexp.MustCompile(`^[0-9a-f]{32}$`)
 // Each account owns its database and encryption key. The registry contains only
 // profile membership and the budget shared by this notifier's outbound calls.
 type Accounts struct {
-	mu      sync.Mutex
-	DB      *sql.DB
-	dir     string
-	engines map[string]*Engine
-	retired []*Store
-	Budget  *APIBudget
+	mu                    sync.Mutex
+	DB                    *sql.DB
+	dir                   string
+	engines               map[string]*Engine
+	retired               []*Store
+	Budget                *APIBudget
+	verificationTransport func(ProxyConfig) http.RoundTripper
 }
 
 type AccountSummary struct {
-	ID       string `json:"id"`
-	Username string `json:"username"`
-	MemberID int64  `json:"member_id"`
-	Enabled  bool   `json:"enabled"`
-	Verified bool   `json:"verified"`
-	Blocked  bool   `json:"blocked"`
+	ID               string `json:"id"`
+	Username         string `json:"username"`
+	MemberID         int64  `json:"member_id"`
+	Enabled          bool   `json:"enabled"`
+	Verified         bool   `json:"verified"`
+	Blocked          bool   `json:"blocked"`
+	CookieConfigured bool   `json:"cookie_configured"`
+	CookieVerified   bool   `json:"cookie_verified"`
+	TokenIssue       string `json:"token_issue"`
+	CookieIssue      string `json:"cookie_issue"`
+	LastError        string `json:"last_error"`
 }
 
 func OpenAccounts(dir string) (*Accounts, error) {
@@ -61,6 +68,9 @@ func OpenAccounts(dir string) (*Accounts, error) {
 		return nil, err
 	}
 	a := &Accounts{DB: db, dir: dir, engines: map[string]*Engine{}, Budget: &APIBudget{DB: db}}
+	a.verificationTransport = func(proxy ProxyConfig) http.RoundTripper {
+		return proxyTransport(http.DefaultTransport.(*http.Transport), proxy.Mode, proxy.URL)
+	}
 	rows, err := db.Query("SELECT id,deleted FROM managed_accounts ORDER BY rowid")
 	if err != nil {
 		db.Close()
@@ -137,15 +147,83 @@ func (a *Accounts) attach(id string, e *Engine) {
 	a.engines[id] = e
 }
 
-func (a *Accounts) Add(token string) (string, error) {
+func (a *Accounts) Add(ctx context.Context, token, cookie string, proxy ProxyConfig) (string, error) {
 	token = strings.TrimSpace(token)
 	if token == "" || len(token) > 4096 || strings.ContainsAny(token, "\r\n") {
 		return "", errors.New("请填写有效的 V2EX API Token")
 	}
+	var err error
+	cookie, err = normalizeWebCookie(cookie)
+	if err != nil {
+		return "", err
+	}
+	proxy, err = resolveProxy(proxy, Config{})
+	if err != nil {
+		return "", err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 25*time.Second)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return "", errors.New("账号验证已取消或超时，请重试")
+	}
+	a.mu.Lock()
+	full := len(a.engines) >= 20
+	a.mu.Unlock()
+	if full {
+		return "", errors.New("最多配置 20 个账号")
+	}
+	// Verify in memory before creating a profile or persisting either credential.
+	// Do not hold the registry lock during network requests.
+	now := time.Now().UTC()
+	allowed, err := a.Budget.Reserve(now)
+	if err != nil {
+		return "", err
+	}
+	if !allowed {
+		return "", errors.New("V2EX API 正在冷却或额度不足，账号尚未保存，请稍后重试")
+	}
+	transport := a.verificationTransport(proxy)
+	if closer, ok := transport.(interface{ CloseIdleConnections() }); ok {
+		defer closer.CloseIdleConnections()
+	}
+	apiClient, webClient := secureClient(20*time.Second), secureClient(10*time.Second)
+	apiClient.Transport, webClient.Transport = transport, transport
+	verifier := &Engine{API: &V2EX{"https://www.v2ex.com/api/v2/", apiClient}, Web: webClient, Budget: a.Budget}
+	var member Member
+	headers, err := verifier.requestAPI(ctx, token, "member", &member, now)
+	if err != nil {
+		return "", err
+	}
+	if member.ID <= 0 || !webUsername.MatchString(member.Username) {
+		return "", errors.New("无法确认 API Token 所属账号，账号尚未保存")
+	}
+	snapshot, err := verifier.readWebUnread(ctx, cookie, member.Username)
+	if err != nil {
+		return "", err
+	}
+	if err := ctx.Err(); err != nil {
+		return "", errors.New("账号验证已取消或超时，请重试")
+	}
+	st := State{AccountID: member.ID, Username: member.Username, Verified: true, Phase: "history", Page: 1,
+		CookieCheckedAt: snapshot.ObservedAt, HasWebUnread: true, WebUnreadCount: snapshot.Count, WebObservedAt: snapshot.ObservedAt}
+	st.tokenValid(now)
+	st.Quota.Observe(headers, now)
+	if !st.Quota.Observed {
+		st.Quota.Remaining--
+	}
+	st.NextAPI = now.Add(st.Quota.Delay(now))
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if len(a.engines) >= 20 {
 		return "", errors.New("最多配置 20 个账号")
+	}
+	var existing int
+	if err := a.DB.QueryRow("SELECT COUNT(*) FROM managed_accounts WHERE member_id=? AND deleted=0", member.ID).Scan(&existing); err != nil {
+		return "", err
+	}
+	if existing != 0 {
+		return "", errors.New("此 V2EX 账号已经添加，请使用已有配置")
 	}
 	bytes := make([]byte, 16)
 	if _, err := rand.Read(bytes); err != nil {
@@ -156,15 +234,13 @@ func (a *Accounts) Add(token string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	st, err := s.State()
-	if err == nil {
-		err = s.SaveConfig(Config{APIToken: token, Enabled: true, IntervalSeconds: 180}, st, false)
-	}
+	err = s.SaveConfig(Config{APIToken: token, Cookie: cookie, ProxyMode: proxy.Mode, ProxyURL: proxy.URL, Enabled: true, IntervalSeconds: 180}, st, false)
 	if err != nil {
+		_ = s.EraseAccount()
 		s.DB.Close()
 		return "", err
 	}
-	if _, err = a.DB.Exec("INSERT INTO managed_accounts(id) VALUES(?)", id); err != nil {
+	if _, err = a.DB.Exec("INSERT INTO managed_accounts(id,member_id) VALUES(?,?)", id, member.ID); err != nil {
 		_ = s.EraseAccount()
 		s.DB.Close()
 		return "", err
@@ -193,7 +269,7 @@ func (a *Accounts) List() ([]AccountSummary, error) {
 		if err != nil {
 			return nil, err
 		}
-		result = append(result, AccountSummary{id, st.Username, st.AccountID, cfg.Enabled, st.Verified, st.AuthBlocked})
+		result = append(result, AccountSummary{ID: id, Username: st.Username, MemberID: st.AccountID, Enabled: cfg.Enabled, Verified: st.Verified, Blocked: st.AuthBlocked || st.CookieIssue != "", CookieConfigured: cfg.Cookie != "", CookieVerified: !st.CookieCheckedAt.IsZero() && st.CookieIssue == "", TokenIssue: st.TokenIssue, CookieIssue: st.CookieIssue, LastError: st.LastError})
 	}
 	sort.Slice(result, func(i, j int) bool {
 		if result[i].Username == result[j].Username {
@@ -271,7 +347,7 @@ func (a *Accounts) collect(ctx context.Context, now time.Time, cursor *int) erro
 	if err != nil {
 		return err
 	}
-	if cfg.Cookie != "" && st.Verified {
+	if canReadWeb(cfg, st) {
 		return e.Step(ctx, now)
 	}
 	ready, err := a.Budget.Ready(now)
@@ -299,7 +375,7 @@ func (a *Accounts) collect(ctx context.Context, now time.Time, cursor *int) erro
 			if err != nil {
 				return err
 			}
-			if c.Enabled && c.Cookie != "" && s.Verified && !s.AuthBlocked && !now.Before(s.NextWeb) && !now.Before(s.NextCheck) {
+			if c.Enabled && canReadWeb(c, s) && s.CookieIssue == "" && !now.Before(s.NextWeb) && !now.Before(s.NextCheck) {
 				return candidate.Step(ctx, now)
 			}
 		}

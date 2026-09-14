@@ -115,6 +115,14 @@ func TestHybridFailureAndAtomicBaseline(t *testing.T) {
 				}
 			}
 			e.Web.Transport, e.API.Client.Transport = web, api
+			if kind == "identity" {
+				cfg, _ := e.Store.Config()
+				cfg.Cookie = "A2=replaced-cookie"
+				if err := e.Configure(cfg); err != nil {
+					t.Fatal(err)
+				}
+				e.Web.Transport = transportFunc(func(*http.Request) (*http.Response, error) { return response(200, webPage("tester", 3)), nil })
+			}
 			hybridStep(t, e)
 			if !stateOf(t, e.Store).HasPushAPIID || queryInt(t, e.Store, "SELECT COUNT(*) FROM outbox") != 1 {
 				t.Fatal("recovery lost summary")
