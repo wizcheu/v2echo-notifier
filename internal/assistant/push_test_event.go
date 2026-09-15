@@ -46,6 +46,7 @@ func (e *pushTestError) Error() string { return e.message }
 // A browser-generated ID survives uncertain HTTP responses. Replaying it only
 // returns the existing event; it cannot reset the relay schedule or resend APNs.
 func (e *Engine) QueuePushTest(eventID string, now time.Time) error {
+	entered := time.Now()
 	e.relayMu.Lock()
 	defer e.relayMu.Unlock()
 	e.mu.Lock()
@@ -68,6 +69,7 @@ func (e *Engine) QueuePushTest(eventID string, now time.Time) error {
 	if !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
+	effectiveNow := now.Add(time.Since(entered))
 	cfg, err := e.Store.Config()
 	if err != nil {
 		return err
@@ -78,6 +80,9 @@ func (e *Engine) QueuePushTest(eventID string, now time.Time) error {
 	}
 	if !cfg.Enabled || !st.Verified || st.AuthBlocked || st.AccountID <= 0 || st.Username == "" {
 		return &pushTestError{status: 409, message: "请先启用同步，并等待 V2EX 账号验证通过"}
+	}
+	if !cfg.allowsPush(effectiveNow) {
+		return &pushTestError{status: 409, message: quietHoursError(cfg, effectiveNow).Error()}
 	}
 	if cfg.RelayURL != PushServiceURL || cfg.RelayToken == "" {
 		return &pushTestError{status: 409, message: "请先在连接与设置中配对接收设备"}

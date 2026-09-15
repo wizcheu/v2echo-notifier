@@ -13,7 +13,7 @@ import (
 func hybridFixture(t *testing.T) (*Engine, *int, *int64, *int) {
 	t.Helper()
 	s := testStore(t)
-	if err := s.SaveConfig(Config{Enabled: true, APIToken: "fake-pat", Cookie: "A2=fake-cookie", IntervalSeconds: 180, RelayURL: PushServiceURL, RelayToken: "fake-relay"}, State{Verified: true, AccountID: 7, Username: "tester"}, false); err != nil {
+	if err := s.SaveConfig(Config{PushSchedule: allDaySchedule(), Enabled: true, APIToken: "fake-pat", Cookie: "A2=fake-cookie", IntervalSeconds: 180, RelayURL: PushServiceURL, RelayToken: "fake-relay"}, State{Verified: true, AccountID: 7, Username: "tester"}, false); err != nil {
 		t.Fatal(err)
 	}
 	e := NewEngine(s)
@@ -162,7 +162,7 @@ func TestHybridSharedQuotaDoesNotBlockHomepageBehindLegacyAccount(t *testing.T) 
 	ids := []string{firstID, secondID}
 	sort.Strings(ids)
 	hybrid, _ := a.Get(ids[1])
-	if err := hybrid.Store.SaveConfig(Config{Enabled: true, APIToken: "fake-pat", Cookie: "A2=fake-cookie", IntervalSeconds: 180}, State{Verified: true, AccountID: 7, Username: "tester"}, false); err != nil {
+	if err := hybrid.Store.SaveConfig(Config{PushSchedule: allDaySchedule(), Enabled: true, APIToken: "fake-pat", Cookie: "A2=fake-cookie", IntervalSeconds: 180}, State{Verified: true, AccountID: 7, Username: "tester"}, false); err != nil {
 		t.Fatal(err)
 	}
 	count, reads := 0, 0

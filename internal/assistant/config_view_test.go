@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -14,7 +15,7 @@ func TestSavedConfigurationRequiresSessionAndSameOriginAndStaysAccountScoped(t *
 	accounts, dir := testAccounts(t)
 	id, engine := addTestAccount(t, accounts, "private-pat", 7, "tester")
 	otherID, _ := addTestAccount(t, accounts, "other-pat", 8, "second")
-	cfg := Config{APIToken: "private-pat", Cookie: "A2=private-cookie", ProxyMode: "custom",
+	cfg := Config{PushSchedule: allDaySchedule(), APIToken: "private-pat", Cookie: "A2=private-cookie", ProxyMode: "custom",
 		ProxyURL: "http://proxy-user:proxy-password@proxy.example:8080", RelayURL: PushServiceURL,
 		RelayToken: "private-sender-token", IntervalSeconds: 240, Enabled: true}
 	if err := engine.Store.SaveConfig(cfg, State{AccountID: 7, Username: "tester", Verified: true}, false); err != nil {
@@ -57,7 +58,7 @@ func TestSavedConfigurationRequiresSessionAndSameOriginAndStaysAccountScoped(t *
 	}
 	res := request(id+"/config", true, "http://localhost", "1")
 	var saved Config
-	if res.Code != 200 || json.Unmarshal(res.Body.Bytes(), &saved) != nil || saved != cfg {
+	if res.Code != 200 || json.Unmarshal(res.Body.Bytes(), &saved) != nil || !reflect.DeepEqual(saved, cfg) {
 		t.Fatal("saved configuration did not round trip")
 	}
 	if res.Header().Get("Cache-Control") != "no-store" {

@@ -13,3 +13,5 @@
 *.db
 *.db-shm
 *.db-wal
+/web/test-results/
+/web/playwright-report/

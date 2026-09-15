@@ -17,6 +17,10 @@ func (f transportFunc) RoundTrip(r *http.Request) (*http.Response, error) { retu
 func response(status int, body string) *http.Response {
 	return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}
 }
+func allDaySchedule() *PushSchedule {
+	return &PushSchedule{Mode: "all_day", Start: "08:00", End: "24:00"}
+}
+
 func testStore(t *testing.T) *Store {
 	t.Helper()
 	s, err := OpenStore(t.TempDir())
@@ -28,7 +32,7 @@ func testStore(t *testing.T) *Store {
 }
 func seed(t *testing.T, s *Store, st State) {
 	t.Helper()
-	if err := s.SaveConfig(Config{APIToken: "fake-test-token", Enabled: true, IntervalSeconds: 180}, st, false); err != nil {
+	if err := s.SaveConfig(Config{PushSchedule: allDaySchedule(), APIToken: "fake-test-token", Enabled: true, IntervalSeconds: 180}, st, false); err != nil {
 		t.Fatal(err)
 	}
 }

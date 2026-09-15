@@ -16,7 +16,7 @@ func pushTestFixture(t *testing.T) (*Engine, time.Time) {
 	t.Helper()
 	s := testStore(t)
 	st := State{Verified: true, Username: "tester", AccountID: 7, Phase: "live", HighWater: 42, AnchorID: 40}
-	cfg := Config{APIToken: "synthetic-pat", Enabled: true, IntervalSeconds: 180, RelayURL: PushServiceURL, RelayToken: "synthetic-sender"}
+	cfg := Config{PushSchedule: allDaySchedule(), APIToken: "synthetic-pat", Enabled: true, IntervalSeconds: 180, RelayURL: PushServiceURL, RelayToken: "synthetic-sender"}
 	if err := s.SaveConfig(cfg, st, false); err != nil {
 		t.Fatal(err)
 	}

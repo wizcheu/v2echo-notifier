@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -115,6 +114,7 @@ func (s *Server) Handler() http.Handler {
 		writeJSON(w, 200, cfg)
 	}))
 	mux.HandleFunc("GET /api/accounts/{accountID}/deliveries", s.account(s.deliveryHistory))
+	mux.HandleFunc("GET /api/accounts/{accountID}/check-history", s.account(s.checkHistory))
 	mux.HandleFunc("POST /api/accounts/{accountID}/push-test", s.account(s.queuePushTest))
 	mux.HandleFunc("PUT /api/accounts/{accountID}/config", s.account(func(e *Engine, w http.ResponseWriter, r *http.Request) {
 		var c Config
@@ -152,10 +152,8 @@ func (s *Server) Handler() http.Handler {
 		}
 		result, err := e.TestProxy(r.Context(), input)
 		if err != nil {
-			var limited *ProxyTestRateError
-			if errors.As(err, &limited) {
-				w.Header().Set("Retry-After", strconv.Itoa(limited.RetryAfter))
-				fail(w, 429, err.Error())
+			if errors.Is(err, ErrProxyTestRunning) {
+				fail(w, http.StatusConflict, err.Error())
 				return
 			}
 			fail(w, 400, err.Error())
@@ -185,6 +183,10 @@ func (s *Server) Handler() http.Handler {
 	}))
 	mux.HandleFunc("POST /api/accounts/{accountID}/check", s.account(func(e *Engine, w http.ResponseWriter, r *http.Request) {
 		if err := e.RequestCheck(); err != nil {
+			if errors.Is(err, ErrQuietHours) || errors.Is(err, ErrSyncDisabled) {
+				fail(w, 409, err.Error())
+				return
+			}
 			fail(w, 500, "无法保存检查请求")
 			return
 		}
@@ -369,10 +371,11 @@ func (s *Server) status(e *Engine, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{
-		"push_test":       pushTest,
-		"account_id":      r.PathValue("accountID"),
-		"config":          map[string]any{"proxy_mode": cfg.ProxyMode, "proxy_url_configured": cfg.ProxyURL != "", "proxy_address": proxyAddress(cfg.ProxyURL), "enabled": cfg.Enabled, "interval_seconds": cfg.IntervalSeconds, "relay_url": cfg.RelayURL, "api_token_configured": cfg.APIToken != "", "relay_token_configured": cfg.RelayToken != "", "cookie_configured": cfg.Cookie != ""},
-		"relay_next_sync": relayNext, "relay_blocked": relayBlocked,
+		"push_test":            pushTest,
+		"push_schedule_status": cfg.scheduleStatus(time.Now().UTC()),
+		"account_id":           r.PathValue("accountID"),
+		"config":               map[string]any{"push_schedule": cfg.schedule(), "proxy_mode": cfg.ProxyMode, "proxy_url_configured": cfg.ProxyURL != "", "proxy_address": proxyAddress(cfg.ProxyURL), "enabled": cfg.Enabled, "interval_seconds": cfg.IntervalSeconds, "relay_url": cfg.RelayURL, "api_token_configured": cfg.APIToken != "", "relay_token_configured": cfg.RelayToken != "", "cookie_configured": cfg.Cookie != ""},
+		"relay_next_sync":      relayNext, "relay_blocked": relayBlocked,
 		"state": st, "notification_count": count, "pending_count": pending, "notifications": items, "deliveries": deliveries,
 	})
 }

@@ -184,11 +184,8 @@ type ProxyTestResult struct {
 	TestedAt time.Time    `json:"tested_at"`
 	Checks   []ProxyCheck `json:"checks"`
 }
-type ProxyTestRateError struct{ RetryAfter int }
 
-func (e *ProxyTestRateError) Error() string {
-	return fmt.Sprintf("请等待 %d 秒后再测试连接", e.RetryAfter)
-}
+var ErrProxyTestRunning = errors.New("连接测试正在进行，请等待本次测试完成")
 
 func (e *Engine) TestProxy(ctx context.Context, input ProxyConfig) (ProxyTestResult, error) {
 	e.mu.Lock()
@@ -205,15 +202,11 @@ func (e *Engine) TestProxy(ctx context.Context, input ProxyConfig) (ProxyTestRes
 	if err != nil {
 		return ProxyTestResult{}, err
 	}
-	e.proxyTestMu.Lock()
-	now := time.Now()
-	if now.Before(e.proxyTestNext) {
-		wait := int(time.Until(e.proxyTestNext).Seconds()) + 1
-		e.proxyTestMu.Unlock()
-		return ProxyTestResult{}, &ProxyTestRateError{RetryAfter: wait}
+	if !e.proxyTestMu.TryLock() {
+		return ProxyTestResult{}, ErrProxyTestRunning
 	}
-	e.proxyTestNext = now.Add(time.Minute)
-	e.proxyTestMu.Unlock()
+	defer e.proxyTestMu.Unlock()
+	now := time.Now()
 	transport := proxyTransport(e.network.base, resolved.Mode, resolved.URL)
 	defer transport.CloseIdleConnections()
 	client := secureClient(8 * time.Second)

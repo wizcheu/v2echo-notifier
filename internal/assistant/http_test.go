@@ -48,6 +48,9 @@ func TestManagementAuthenticationAndSecretRedaction(t *testing.T) {
 	if res := request("GET", "/api/accounts/"+id+"/deliveries", "", "", nil); res.Code != 401 {
 		t.Fatal("push history exposed without login")
 	}
+	if res := request("GET", "/api/accounts/"+id+"/check-history", "", "", nil); res.Code != 401 {
+		t.Fatal("check history exposed without login")
+	}
 	for _, operation := range []struct{ method, path string }{{"PUT", "proxy"}, {"POST", "proxy/test"}} {
 		if res := request(operation.method, "/api/accounts/"+id+"/"+operation.path, `{"proxy_mode":"direct"}`, "", nil); res.Code != 401 {
 			t.Fatal("proxy route exposed without authentication")
@@ -123,8 +126,8 @@ func TestManagementAuthenticationAndSecretRedaction(t *testing.T) {
 	if res = request("POST", "/api/accounts/"+id+"/proxy/test", `{"proxy_mode":"custom"}`, "", cookies[0]); res.Code != 200 || strings.Contains(res.Body.String(), "proxy-secret") || !strings.Contains(res.Body.String(), `"checks":[`) {
 		t.Fatal("test response invalid or leaked credentials")
 	}
-	if res = request("POST", "/api/accounts/"+id+"/proxy/test", `{"proxy_mode":"custom"}`, "", cookies[0]); res.Code != 429 || res.Header().Get("Retry-After") == "" {
-		t.Fatal("probe route did not enforce cooldown")
+	if res = request("POST", "/api/accounts/"+id+"/proxy/test", `{"proxy_mode":"custom"}`, "", cookies[0]); res.Code != 200 {
+		t.Fatal("completed proxy test could not be retried immediately")
 	}
 	oneConfig, _ := one.Store.Config()
 	if !oneConfig.Enabled || oneConfig.IntervalSeconds != 180 {
@@ -141,6 +144,18 @@ func TestManagementAuthenticationAndSecretRedaction(t *testing.T) {
 	otherHistory := request("GET", "/api/accounts/"+second.ID+"/deliveries", "", "", cookies[0])
 	if otherHistory.Code != 200 || !strings.Contains(otherHistory.Body.String(), `"items":[]`) {
 		t.Fatal("history crossed account boundary")
+	}
+	if err := one.Store.SaveCheckRecord(CheckRecord{Status: "failed", Summary: "合成检查记录"}); err != nil {
+		t.Fatal(err)
+	}
+	beforeRead := stateOf(t, one.Store)
+	checks := request("GET", "/api/accounts/"+id+"/check-history", "", "", cookies[0])
+	if checks.Code != 200 || !strings.Contains(checks.Body.String(), "合成检查记录") || !strings.Contains(checks.Body.String(), `"unread_count":null`) {
+		t.Fatal("incorrect check response", checks.Body.String())
+	}
+	otherChecks := request("GET", "/api/accounts/"+second.ID+"/check-history", "", "", cookies[0])
+	if otherChecks.Code != 200 || !strings.Contains(otherChecks.Body.String(), `"items":[]`) || stateOf(t, one.Store) != beforeRead {
+		t.Fatal("check history crossed account boundary or changed scheduling")
 	}
 	for _, query := range []string{"limit=0", "limit=51", "before=-1", "before=bad", "status=unknown"} {
 		if r := request("GET", "/api/accounts/"+id+"/deliveries?"+query, "", "", cookies[0]); r.Code != 400 {
@@ -175,7 +190,7 @@ func TestManagementAuthenticationAndSecretRedaction(t *testing.T) {
 			t.Fatal("unexpected local unread estimate", n)
 		}
 	}
-	for _, path := range []string{"/api/status", "/api/accounts/unknown/status"} {
+	for _, path := range []string{"/api/status", "/api/accounts/unknown/status", "/api/accounts/unknown/check-history"} {
 		if res = request("GET", path, "", "", cookies[0]); res.Code != 404 {
 			t.Fatal("missing account route fell back to another account")
 		}

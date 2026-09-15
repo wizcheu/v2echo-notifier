@@ -16,7 +16,7 @@ func relayFixture(t *testing.T) (*Engine, time.Time) {
 	s := testStore(t)
 	now := time.Unix(1789200000, 0)
 	st := State{AccountID: 7, AnchorID: 1}
-	if err := s.SaveConfig(Config{Enabled: true, IntervalSeconds: 180, RelayURL: "https://relay.example", RelayToken: "test-relay-secret"}, st, false); err != nil {
+	if err := s.SaveConfig(Config{PushSchedule: allDaySchedule(), Enabled: true, IntervalSeconds: 180, RelayURL: "https://relay.example", RelayToken: "test-relay-secret"}, st, false); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.ImportPage(st, []Notification{notification(2)}, true); err != nil {

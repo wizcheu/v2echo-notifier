@@ -6,17 +6,19 @@ const PushServiceURL = "https://app.v2echo.com/api/push"
 const PushTestBody = "这是一条 V2Echo 测试推送，收到此消息说明推送已到达设备。"
 
 type Config struct {
-	Cookie          string `json:"cookie,omitempty"`
-	ProxyMode       string `json:"proxy_mode"`
-	ProxyURL        string `json:"proxy_url"`
-	APIToken        string `json:"api_token"`
-	RelayURL        string `json:"relay_url"`
-	RelayToken      string `json:"relay_token"`
-	Enabled         bool   `json:"enabled"`
-	IntervalSeconds int    `json:"interval_seconds"`
+	PushSchedule    *PushSchedule `json:"push_schedule,omitempty"`
+	Cookie          string        `json:"cookie,omitempty"`
+	ProxyMode       string        `json:"proxy_mode"`
+	ProxyURL        string        `json:"proxy_url"`
+	APIToken        string        `json:"api_token"`
+	RelayURL        string        `json:"relay_url"`
+	RelayToken      string        `json:"relay_token"`
+	Enabled         bool          `json:"enabled"`
+	IntervalSeconds int           `json:"interval_seconds"`
 }
 
 type State struct {
+	CheckRequested     bool      `json:"check_requested,omitempty"`
 	TokenIssue         string    `json:"token_issue"`
 	CookieIssue        string    `json:"cookie_issue"`
 	TokenCheckedAt     time.Time `json:"token_checked_at"`

@@ -135,17 +135,12 @@ func TestProxyDraftProbeDoesNotPersistOrResetBudgets(t *testing.T) {
 			t.Fatal("incorrect or unsafe failure result")
 		}
 	}
-	if _, err := e.TestProxy(context.Background(), ProxyConfig{Mode: "direct"}); err == nil {
-		t.Fatal("test cooldown bypassed")
-	} else {
-		var limited *ProxyTestRateError
-		if !errors.As(err, &limited) || limited.RetryAfter < 1 || limited.RetryAfter > 60 {
-			t.Fatal("incorrect cooldown", err)
-		}
+	if _, err := e.TestProxy(context.Background(), ProxyConfig{Mode: "custom", URL: "https://user:proxy-secret@draft.example:8443"}); err != nil {
+		t.Fatal("completed probe prevented immediate retry", err)
 	}
 	after, _ := s.Config()
-	if attempts.Load() != 2 || !reflect.DeepEqual(before, after) || !reflect.DeepEqual(stateBefore, stateOf(t, s)) || queryInt(t, s, "SELECT next_sync FROM relay_schedule") != 9999999999 || queryInt(t, s, "SELECT failures FROM relay_schedule") != 5 || queryInt(t, s, "SELECT blocked FROM relay_schedule") != 1 {
-		t.Fatal("manual probe mutated account, schedule or bypassed its cooldown")
+	if attempts.Load() != 4 || !reflect.DeepEqual(before, after) || !reflect.DeepEqual(stateBefore, stateOf(t, s)) || queryInt(t, s, "SELECT next_sync FROM relay_schedule") != 9999999999 || queryInt(t, s, "SELECT failures FROM relay_schedule") != 5 || queryInt(t, s, "SELECT blocked FROM relay_schedule") != 1 {
+		t.Fatal("manual probe mutated account or schedule")
 	}
 }
 
@@ -298,5 +293,46 @@ func TestHTTPAndHTTPSProxyTunnelAllClientsWithoutLeakingCredentials(t *testing.T
 				t.Fatal("direct mode did not reach origin")
 			}
 		})
+	}
+}
+
+func TestProxyRejectsConcurrentProbeAndAllowsRetry(t *testing.T) {
+	e := NewEngine(testStore(t))
+	defer e.network.CloseIdleConnections()
+	started := make(chan struct{}, 2)
+	e.network.base.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+		started <- struct{}{}
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := e.TestProxy(ctx, ProxyConfig{Mode: "direct"})
+		done <- err
+	}()
+	for i := 0; i < 2; i++ {
+		select {
+		case <-started:
+		case <-time.After(3 * time.Second):
+			t.Fatal("probe did not start")
+		}
+	}
+	if _, err := e.TestProxy(context.Background(), ProxyConfig{Mode: "direct"}); !errors.Is(err, ErrProxyTestRunning) {
+		t.Fatalf("concurrent probe was not rejected: %v", err)
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("cancelled probe did not finish")
+	}
+	// A cancelled run also releases the slot immediately.
+	if _, err := e.TestProxy(ctx, ProxyConfig{Mode: "direct"}); err != nil {
+		t.Fatal("cancelled probe prevented retry", err)
 	}
 }

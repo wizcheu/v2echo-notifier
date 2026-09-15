@@ -1,412 +1,298 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { FormEvent, ReactNode } from 'react'
-import PushHistory from './PushHistory'
-import SecretField from './SecretField'
-import AccountManager, { TokenHelp } from './AccountManager'
+import type { FormEvent } from 'react'
+import AccountWorkspace from './AccountWorkspace'
+import AccountManager from './AccountManager'
 import type { Account } from './AccountManager'
-import type { PushHistoryPage } from './PushHistory'
-import PushTest, { pushServiceURL } from './PushTest'
-import type { PushTestState } from './PushTest'
+import SecretField from './SecretField'
+import Shell from './Shell'
+import LoginLayout from './LoginLayout'
+import { api, APIError } from './api'
+import { accountHref, navigate } from './routes'
+import { useRoute } from './useRoute'
 
 type ProxyMode = 'environment' | 'direct' | 'custom'
-type Config = { cookie_configured: boolean; proxy_mode: ProxyMode; proxy_url_configured: boolean; proxy_address: string; enabled: boolean; interval_seconds: number; relay_url: string; api_token_configured: boolean; relay_token_configured: boolean }
-type State = {
-  token_issue: string; cookie_issue: string; token_checked_at: string; cookie_checked_at: string; next_token_check: string;
-  has_web_unread: boolean; web_unread_count: number; web_observed_at: string;
-  initial_pairing_done: boolean; initial_unread_count: number; initial_unread_at: string
-  username: string; phase: string; page: number; verified: boolean; auth_blocked: boolean
-  last_error: string; next_api: string; next_check: string; last_success: string
-  quota: { limit: number; remaining: number; reset: string; observed: boolean }
-}
-type Snapshot = {
-  push_test: PushTestState; config: Config; state: State; relay_next_sync: number; relay_blocked: boolean; notification_count: number; pending_count: number
-  notifications: { id: number; title: string; body: string; created: number }[]
-  deliveries: { type: string; event_id: string; status: string; submitted: boolean; attempts: number; detail: string }[]
-}
-type ProxyDraft = { proxy_mode: ProxyMode; proxy_url: string }
-type ProxyResult = { proxy_mode: ProxyMode; tested_at: string; checks: { name: string; url: string; connected: boolean; http_status: number; latency_ms: number; message: string }[] }
-type Draft = { cookie: string; api_token: string; interval_seconds: number; enabled: boolean }
-type SavedConfig = Draft & ProxyDraft & { relay_url: string; relay_token: string }
-const initialDraft: Draft = { cookie: '', api_token: '', interval_seconds: 180, enabled: false }
-const phases: Record<string, string> = { history: '导入历史通知', catchup: '补扫导入期间的新通知', live: '检查增量通知' }
-const pages = {
-  overview: { title: '运行概览', description: '查看通知同步、推送连接与可用额度。' },
-  settings: { title: '连接与设置', description: '管理当前账号的凭据、接收设备和同步偏好。' },
-  proxy: { title: '网络代理', description: '设置这台服务器访问通知与推送服务的连接方式。' },
-  pushTest: { title: '推送测试', description: '发送一条测试消息，检查当前账号到 App 的推送连接。' },
-  pushHistory: { title: '推送历史', description: '回看上报过的内容，追踪每条事件的处理结果。' },
-  history: { title: '通知记录', description: '查看当前账号已同步到服务器的通知。' },
-}
-
-class APIError extends Error { constructor(message: string, public status: number) { super(message) } }
-async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
-  const response = await fetch(`/api/${path}`, {
-    method, credentials: 'same-origin', signal: AbortSignal.timeout(30_000),
-    headers: { 'Content-Type': 'application/json', 'X-V2Echo-Request': '1' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  })
-  const result = await response.json()
-  if (!response.ok) throw new APIError(result.error ?? '请求失败', response.status)
-  return result as T
-}
-function time(value: string | number) {
-  if (!value || (typeof value === 'string' && value.startsWith('0001'))) return '尚无记录'
-  return new Date(typeof value === 'number' ? value * 1000 : value).toLocaleString('zh-CN', { hour12: false })
-}
-
-
-
+const emptyProxy = { proxy_mode: 'environment' as ProxyMode, proxy_url: '' }
 export default function App() {
+  const { route } = useRoute()
   const [accounts, setAccounts] = useState<Account[]>([])
-  const [selected, setSelected] = useState('')
   const [authenticated, setAuthenticated] = useState<boolean | null>(null)
-  const [adding, setAdding] = useState(false)
-  const [managing, setManaging] = useState(false)
-  const [workspaceTab, setWorkspaceTab] = useState<'overview' | 'settings'>('overview')
   const [newCookie, setNewCookie] = useState('')
-  const [newProxy, setNewProxy] = useState<ProxyDraft>({ proxy_mode: 'environment', proxy_url: '' })
+  const [newProxy, setNewProxy] = useState(emptyProxy)
   const [credential, setCredential] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [listError, setListError] = useState('')
   const listGeneration = useRef(0)
+  const selected = route.kind === 'workspace' ? route.accountID : (accounts[0]?.id ?? '')
+  const adding = route.kind === 'add'
   const sessionExpired = useCallback(() => {
-    listGeneration.current++; setAuthenticated(false); setAccounts([]); setSelected(''); setCredential(''); setNewCookie(''); setNewProxy({ proxy_mode: 'environment', proxy_url: '' }); setAdding(false); setManaging(false)
+    listGeneration.current++
+    setAuthenticated(false)
+    setAccounts([])
+    setCredential('')
+    setNewCookie('')
+    setNewProxy(emptyProxy)
   }, [])
   const refreshAccounts = useCallback(async () => {
     const version = ++listGeneration.current
     try {
       const result = await api<{ accounts: Account[] }>('accounts')
       if (version !== listGeneration.current) return
-      setAccounts(result.accounts); setAuthenticated(true); setListError('')
-      setSelected(old => result.accounts.some(a => a.id === old) ? old : result.accounts[0]?.id ?? '')
+      setAccounts(result.accounts)
+      setAuthenticated(true)
+      setListError('')
     } catch (e) {
       if (version !== listGeneration.current) return
       if (e instanceof APIError && e.status === 401) sessionExpired()
-      else { setListError('无法读取账号列表，请检查连接。'); setAuthenticated(v => v ?? false) }
+      else setListError('无法读取账号列表，请检查连接。')
     }
   }, [sessionExpired])
-  useEffect(() => { void refreshAccounts(); return () => { listGeneration.current++ } }, [refreshAccounts])
+  useEffect(() => {
+    void refreshAccounts()
+    return () => {
+      listGeneration.current++
+    }
+  }, [refreshAccounts])
   useEffect(() => {
     if (!authenticated) return
     const timer = window.setInterval(() => void refreshAccounts(), 5000)
     return () => window.clearInterval(timer)
   }, [authenticated, refreshAccounts])
+  useEffect(() => {
+    if (authenticated && route.kind === 'home')
+      navigate(accounts.length ? accountHref(accounts[0].id) : '#/accounts/new', true)
+  }, [authenticated, accounts, route.kind])
+  useEffect(() => {
+    setCredential('')
+    setNewCookie('')
+    setNewProxy(emptyProxy)
+    setError('')
+  }, [adding])
   async function submit(event: FormEvent) {
-    event.preventDefault(); setBusy(true); setError('')
-    try {
-      if (!authenticated) { await api('login', 'POST', { token: credential }); await refreshAccounts() }
-      else { const result = await api<{ id: string }>('accounts', 'POST', { api_token: credential, cookie: newCookie, ...newProxy }); await refreshAccounts(); setSelected(result.id); setWorkspaceTab('settings'); setAdding(false); setManaging(false); setNewCookie(''); setNewProxy({ proxy_mode: 'environment', proxy_url: '' }) }
-      setCredential('')
-    } catch (e) { setError(e instanceof Error ? e.message : '保存失败') }
-    finally { setBusy(false) }
-  }
-  async function logout() { await api('logout', 'POST', {}); sessionExpired() }
-  async function removeAccount(id: string) {
-    try { await api(`accounts/${encodeURIComponent(id)}`, 'DELETE', {}); await refreshAccounts() }
-    catch (e) { if (e instanceof APIError && e.status === 401) sessionExpired(); throw e }
-  }
-  if (authenticated === null) return <main className="login-shell"><p role="status">正在连接通知助手…</p></main>
-  if (!authenticated || adding || (!accounts.length && !managing)) return <main className="login-shell"><form className="login-panel" onSubmit={submit}>
-    <div className="wordmark">V2Echo <span>通知助手</span></div>
-    <h1>{authenticated ? '添加 V2EX 账号' : '连接你的通知助手'}</h1>
-    <p className="muted">{authenticated ? '先选择服务器的连接方式，再验证 API Token 与网页 Cookie，只有两者的用户名完全一致才会保存账号。每个账号独立保存凭据、同步进度和通知记录。' : '输入服务器数据目录 admin-token 文件中的管理密钥。'}</p>
-    {authenticated ? <>
-      <label>验证与同步的连接方式<select value={newProxy.proxy_mode} disabled={busy} onChange={e => setNewProxy({ proxy_mode: e.target.value as ProxyMode, proxy_url: '' })}>
-        <option value="environment">使用环境变量代理</option><option value="custom">自定义 HTTP / HTTPS 代理</option><option value="direct">直接连接</option>
-      </select></label>
-      {newProxy.proxy_mode === 'custom' && <>
-        <SecretField label="代理地址" value={newProxy.proxy_url} onChange={value => setNewProxy({ ...newProxy, proxy_url: value })} required disabled={busy} maxLength={4096} placeholder="http://代理主机:端口" />
-        <p className="caption">填写 notifier 服务器可访问的代理地址；需要认证时使用 http://用户名:密码@主机:端口，密码中的特殊字符需进行 URL 编码。</p>
-      </>}
-      <p className="caption">此连接方式立即用于账号验证，通过后与账号一起保存，后续可在「网络代理」中修改。环境变量模式读取 notifier 服务器的代理设置。</p>
-      <SecretField label="V2EX API Token" value={credential} onChange={setCredential} required disabled={busy} placeholder="粘贴 Personal Access Token" />
-      <TokenHelp />
-      <SecretField label="同账号的网页 Cookie" value={newCookie} onChange={setNewCookie} required disabled={busy} maxLength={16384} placeholder="A2=…; 其他 Cookie…" />
-      <p className="caption">从已登录 V2EX 的浏览器复制完整 Cookie 请求头，需包含 A2。两项均为必填，用户名需完全一致（区分大小写）；验证通过后，凭据加密保存在此服务器。</p>
-    </> : <label>管理密钥<input type="text" autoComplete="off" required maxLength={4096} value={credential} onChange={e => setCredential(e.target.value)} /></label>}
-
-    {(error || listError) && <p className="notice error" role="alert">{error || listError}</p>}
-    <button className="primary" disabled={busy}>{busy ? (authenticated ? '正在验证账号…' : '处理中…') : authenticated ? '验证并保存账号' : '进入管理页'}</button>
-    {authenticated && (accounts.length > 0 || managing) && <button type="button" disabled={busy} onClick={() => { setAdding(false); setCredential(''); setNewCookie(''); setNewProxy({ proxy_mode: 'environment', proxy_url: '' }); setError('') }}>返回账号</button>}
-    {authenticated && <button type="button" disabled={busy} onClick={() => { setBusy(true); void logout().catch(() => setError('退出失败，请重试')).finally(() => setBusy(false)) }}>退出管理页</button>}
-    <p className="caption">一个管理密钥可管理这里的全部账号，请只交给可信的管理员。</p>
-  </form></main>
-  if (managing) return <AccountManager accounts={accounts} error={listError}
-    onAdd={() => { setCredential(''); setNewCookie(''); setNewProxy({ proxy_mode: 'environment', proxy_url: '' }); setError(''); setAdding(true) }}
-    onOpen={id => { setSelected(id); setWorkspaceTab('settings'); setManaging(false) }}
-    onRemove={removeAccount} onBack={() => setManaging(false)} />
-  const needsUpdate = accounts.filter(a => a.token_issue || a.cookie_issue || !a.cookie_configured).length
-  return <AccountWorkspace key={selected} initialTab={workspaceTab} onManage={() => setManaging(true)} accountID={selected} onExpired={sessionExpired} onLogout={logout} onRemove={async () => { await removeAccount(selected); setManaging(true) }} accountControls={<>
-    <label>当前管理的账号<select value={selected} onChange={e => { setSelected(e.target.value); setWorkspaceTab('overview') }}>{accounts.map(account => <option key={account.id} value={account.id}>{account.username ? `@${account.username}` : `待验证 · ${account.id.slice(0, 6)}`}{account.blocked ? ' · 需处理' : !account.enabled ? ' · 已暂停' : ''}</option>)}</select></label>
-    <button className="text-button" type="button" onClick={() => { setCredential(''); setNewCookie(''); setNewProxy({ proxy_mode: 'environment', proxy_url: '' }); setError(''); setAdding(true) }}>添加账号</button>
-    {needsUpdate > 0 && <button className="text-button" onClick={() => setManaging(true)}>{needsUpdate} 个账号的凭据需要更新</button>}
-    {(error || listError) && <p className="notice error" role="alert">{error || listError}</p>}
-  </>} />
-}
-
-function AccountWorkspace({ accountID, accountControls, onExpired, onLogout, onRemove, onManage, initialTab }: {
-  initialTab: 'overview' | 'settings'; onManage: () => void;
-  accountID: string; accountControls: ReactNode; onExpired: () => void; onLogout: () => Promise<void>; onRemove: () => Promise<void>
-}) {
-  const [snapshot, setSnapshot] = useState<Snapshot | null>(null)
-  const [tab, setTab] = useState<'overview' | 'settings' | 'proxy' | 'history' | 'pushHistory' | 'pushTest'>(initialTab)
-  const [draft, setDraft] = useState<Draft>(initialDraft)
-  const [proxyDraft, setProxyDraft] = useState<ProxyDraft>({ proxy_mode: 'environment', proxy_url: '' })
-  const [proxyResult, setProxyResult] = useState<ProxyResult | null>(null)
-  const proxySeeded = useRef(false)
-  const [configLoaded, setConfigLoaded] = useState(false)
-  const [configLoading, setConfigLoading] = useState(false)
-  const [configError, setConfigError] = useState('')
-  const [relayToken, setRelayToken] = useState('')
-  const configVersion = useRef(0)
-  const refreshVersion = useRef(0)
-  const [pairCode, setPairCode] = useState('')
-  const [pairCookie, setPairCookie] = useState('')
-  const testRequestID = useRef('')
-  const [error, setError] = useState('')
-  const [message, setMessage] = useState('')
-  const [connectionError, setConnectionError] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [confirmRemove, setConfirmRemove] = useState(false)
-  const seeded = useRef(false)
-  const active = useRef(true)
-  const accountPath = useCallback((path: string) => `accounts/${encodeURIComponent(accountID)}/${path}`, [accountID])
-  const loadDeliveries = useCallback(async (query: string) => {
-    try { return await api<PushHistoryPage>(`${accountPath('deliveries')}?${query}`) }
-    catch (e) { if (e instanceof APIError && e.status === 401) onExpired(); throw e }
-  }, [accountPath, onExpired])
-  const loadSavedConfig = useCallback(async (scope: 'all' | 'settings' | 'proxy' | 'pairing' = 'all') => {
-    const version = ++configVersion.current
-    setConfigLoading(true); setConfigError('')
-    try {
-      const saved = await api<SavedConfig>(accountPath('config'))
-      if (!active.current || version !== configVersion.current) return
-      if (scope === 'all' || scope === 'settings') {
-        seeded.current = true
-        setDraft({ api_token: saved.api_token, cookie: saved.cookie ?? '', interval_seconds: saved.interval_seconds, enabled: saved.enabled })
-      }
-      if (scope === 'all' || scope === 'proxy') {
-        proxySeeded.current = true
-        setProxyDraft({ proxy_mode: saved.proxy_mode, proxy_url: saved.proxy_url })
-      }
-      if (scope === 'pairing') setDraft(d => ({ ...d, cookie: d.cookie || saved.cookie || '' }))
-      setRelayToken(saved.relay_token)
-      setConfigLoaded(true)
-    } catch (e) {
-      if (!active.current || version !== configVersion.current) return
-      setConfigError('无法读取已保存设置，请重试。')
-      if (e instanceof APIError && e.status === 401) onExpired()
-      throw e
-    } finally {
-      if (active.current && version === configVersion.current) setConfigLoading(false)
-    }
-  }, [accountPath, onExpired])
-  useEffect(() => {
-    if ((tab === 'settings' || tab === 'proxy') && !configLoaded) void loadSavedConfig().catch(() => {})
-  }, [tab, configLoaded, loadSavedConfig])
-  const refreshing = useRef(false)
-  const refresh = useCallback(async (force = false) => {
-    if (refreshing.current && !force) return
-    refreshing.current = true
-    const version = ++refreshVersion.current
-    try {
-      const data = await api<Snapshot>(accountPath('status'))
-      if (!active.current || version !== refreshVersion.current) return
-      setSnapshot(data)
-      setConnectionError('')
-      if (!proxySeeded.current) { setProxyDraft({ proxy_mode: data.config.proxy_mode, proxy_url: '' }); proxySeeded.current = true }
-      if (!seeded.current) {
-        setDraft({ ...initialDraft, enabled: data.config.enabled, interval_seconds: data.config.interval_seconds })
-        seeded.current = true
-      }
-    } catch (e) {
-      if (!active.current || version !== refreshVersion.current) return
-      if (e instanceof APIError && e.status === 401) {
-        if (active.current) onExpired()
-      } else { setConnectionError('无法连接通知助手，当前显示的可能是上次读取的状态。'); }
-    } finally { if (version === refreshVersion.current) refreshing.current = false }
-  }, [accountPath, onExpired])
-  useEffect(() => { active.current = true; void refresh(); return () => { active.current = false } }, [refresh])
-  useEffect(() => {
-    const timer = window.setInterval(() => void refresh(), 5000)
-    return () => window.clearInterval(timer)
-  }, [refresh])
-
-  async function action(fn: () => Promise<void>) {
-    setBusy(true); setError(''); setMessage('')
-    try { await fn() } catch (e) {
-      setError(e instanceof Error ? e.message : '操作失败，请重试')
-      if (active.current && e instanceof APIError && e.status === 401) onExpired()
-    } finally { setBusy(false) }
-  }
-  function save(event: FormEvent) {
     event.preventDefault()
-    void action(async () => {
-      await api(accountPath('config'), 'PUT', draft)
-      refreshVersion.current++
-      await loadSavedConfig('settings')
-      await refresh(true); setMessage('设置已保存。启用后将按可用额度执行检查。')
-    })
-  }
-
-  if (!snapshot) return <main className="login-shell"><div className="login-panel">
-    <div className="account-controls">{accountControls}</div>
-    {connectionError ? <><p className="notice error" role="alert">{connectionError}</p><button onClick={() => void refresh()}>重新连接</button></> : <p role="status">正在读取状态…</p>}
-  </div></main>
-
-  const { config, state, notifications } = snapshot
-  const configured = config.api_token_configured
-  const relayReady = Boolean(config.relay_url === pushServiceURL && config.relay_token_configured)
-  const phase = state.token_issue ? '需要更新 API Token' : state.cookie_issue ? '需要更新 Cookie' : !configured ? '等待配置' : !config.enabled ? '已暂停' : state.auth_blocked ? '需要更新 Token' : !state.verified ? '验证账号' : phases[state.phase] ?? state.phase
-  const next = new Date(state.next_api) > new Date(state.next_check) ? state.next_api : state.next_check
-  return <div className="app-shell">
-    <a className="skip-link" href="#main-content">跳到页面内容</a>
-    <aside className="sidebar">
-      <div className="wordmark">V2Echo<span>自托管通知助手</span></div>
-      <div className="account-controls">{accountControls}</div>
-      <nav aria-label="主导航">
-        {([['overview', '运行概览'], ['settings', '连接与设置'], ['proxy', '网络代理'], ['pushTest', '推送测试'], ['pushHistory', '推送历史'], ['history', '通知记录']] as const).map(([key, label]) =>
-          <button key={key} className={tab === key ? 'nav-item selected' : 'nav-item'} aria-current={tab === key ? 'page' : undefined} onClick={() => setTab(key)}>{label}</button>)}
-        <button className="nav-item" onClick={onManage}>账号管理</button>
-      </nav>
-      <div className="sidebar-footer"><span>凭据保存在这台服务器</span><button className="text-button" disabled={busy} onClick={() => void action(async () => { await onLogout() })}>退出管理页</button></div>
-    </aside>
-    <main className="workspace" id="main-content" tabIndex={-1}>
-      <header className="page-header">
-        <div><h1>{pages[tab].title}</h1><p className="page-description">{pages[tab].description}</p></div>
-        <span className={`status-pill ${state.auth_blocked || state.cookie_issue ? 'warning' : !config.enabled ? 'neutral' : ''}`}>{phase}</span>
-      </header>
-      {connectionError && <div className="notice error" role="alert"><span>{connectionError}</span><button onClick={() => void refresh()}>重新连接</button></div>}
-      {error && <div className="notice error" role="alert">{error}<button className="text-button" onClick={() => setError('')}>关闭</button></div>}
-      {message && <div className="notice" role="status">{message}</div>}
-      {state.last_error && state.last_error !== state.token_issue && state.last_error !== state.cookie_issue && <div className="notice error" role="alert">{state.last_error}</div>}
-
-      {state.token_issue && <section className="notice error" role="alert"><div><strong>请更新 API Token</strong><p>{state.token_issue}</p><TokenHelp /></div>{tab !== 'settings' && <button onClick={() => setTab('settings')}>更新 Token</button>}</section>}
-      {state.cookie_issue && <section className="notice error" role="alert"><div><strong>请更新 Cookie</strong><p>{state.cookie_issue}</p></div>{tab !== 'settings' && <button onClick={() => setTab('settings')}>更新 Cookie</button>}</section>}
-      {tab === 'overview' && <>
-        {!config.cookie_configured && <section className="setup-panel"><div><h2>让提醒显示网页未读总数</h2><p>保存登录 Cookie 后，由 API 首条消息 ID 的变化触发提醒、网页提供未读数量，每轮最多一条提醒。未配置时沿用逐条通知提醒。</p></div><button onClick={() => setTab('settings')}>配置 Cookie</button></section>}
-        {!configured && <section className="setup-panel"><div><h2>先连接你的 V2EX 账号</h2><p>使用个人 API Token 导入历史通知，然后自动检测新增通知。</p></div><button className="primary" onClick={() => setTab('settings')}>配置连接</button></section>}
-        <div className="metrics">
-          <div><span>网页未读快照</span><strong>{state.has_web_unread ? state.web_unread_count : '—'}</strong><small>{state.has_web_unread ? time(state.web_observed_at) : '保存 Cookie 后读取'}</small></div>
-          <div><span>待处理事件</span><strong>{snapshot.pending_count.toLocaleString()}</strong><small>{relayReady ? '等待上报或服务端回执' : '配置推送服务后开始上报'}</small></div>
-          <div><span>所有账号共享额度</span><strong>{state.quota.limit ? state.quota.remaining : '—'}<em>{state.quota.limit ? ` / ${state.quota.limit}` : ''}</em></strong><small>{state.quota.observed ? '来自最近一次 API 响应' : '尚无响应额度，使用保守预算'}</small></div>
-        </div>
-        <div className="overview-grid"><section className="panel">
-          <div className="section-heading"><h2>同步状态</h2><button disabled={busy || !config.enabled || state.auth_blocked || Boolean(state.cookie_issue)} onClick={() => void action(async () => { await api(accountPath('check'), 'POST', {}); await refresh(); setMessage('已安排检查，仍会遵守额度限制和错误退避。') })}>立即检查</button></div>
-          <dl className="details">
-            <div><dt>当前阶段</dt><dd>{phase}{state.verified && state.phase !== 'live' ? ` · 第 ${state.page} 页` : ''}</dd></div>
-            <div><dt>最近检查完成</dt><dd>{time(state.last_success)}</dd></div>
-            <div><dt>下次允许检查</dt><dd>{config.enabled && !state.auth_blocked && !state.cookie_issue ? time(next) : '等待启用或更新凭据'}</dd></div>
-            <div><dt>期望检查间隔</dt><dd>{config.interval_seconds} 秒 · 额度不足时自动延长</dd></div>
-            <div><dt>额度窗口结束</dt><dd>{time(state.quota.reset)}</dd></div>
-          </dl>
-          <p className="caption">初次导入的历史通知不会推送。API 返回的是通知记录，本页数量不代表上游未读数。</p>
-        </section>
-        <section className="panel">
-          <div className="section-heading"><h2>推送连接</h2><button className="text-button" onClick={() => setTab(relayReady ? 'pushHistory' : 'settings')}>{relayReady ? '查看推送历史' : '配置连接'}</button></div>
-          <dl className="details">
-            <div><dt>推送服务</dt><dd>{relayReady ? '已配置，回执可在推送历史中查看' : '未配置 · 可先完成本地同步'}</dd></div>
-            <div><dt>下次允许上报</dt><dd>{!relayReady || !config.enabled ? '等待配置或启用' : snapshot.relay_blocked ? '凭据失效，请重新配对' : snapshot.relay_next_sync * 1000 > Date.now() ? time(snapshot.relay_next_sync) : '有待处理事件时上报'}</dd></div>
-            <div><dt>上报间隔</dt><dd>至少 3 分钟一轮 · 无待处理事项时不通信</dd></div>
-          </dl>
-          <p className="caption">APNs 已接收不代表设备已送达；推送历史记录助手取得回执的时间。</p>
-        </section></div>
-        <section className="panel"><div className="section-heading"><h2>最近通知</h2><button className="text-button" onClick={() => setTab('history')}>查看记录</button></div><NotificationList items={notifications.slice(0, 5)} /></section>
-      </>}
-
-      {(tab === 'settings' || tab === 'proxy') && !configLoaded && <section className="panel" aria-busy={configLoading}>
-        <p role="status">{configLoading ? '正在读取已保存设置…' : '已保存设置暂时不可用。'}</p>
-        {!configLoading && <button type="button" onClick={() => void loadSavedConfig().catch(() => {})}>重新读取</button>}
-      </section>}
-      {(tab === 'settings' || tab === 'proxy') && configError && <p className="notice error" role="alert">{configError}</p>}
-      {tab === 'settings' && configLoaded && <div className="settings">
-        <section className="panel"><h2>配对接收设备</h2><p className="muted">在接收设备的通知设置中生成配对码。两端需要使用同一个 V2EX 账号。</p>
-          <dl className="details"><div><dt>推送服务</dt><dd>{pushServiceURL}（固定）</dd></div></dl>
-          <SecretField label="推送发送 Token" value={relayToken} readOnly disabled={busy || configLoading} placeholder="配对后自动生成" />
-          <p className="caption">此 Token 由配对生成，可查看和复制；重新配对后自动更新。</p>
-          <label>配对码<input autoComplete="off" spellCheck={false} maxLength={28} placeholder="V2E-…" value={pairCode} onChange={e => setPairCode(e.target.value)} /></label>
-          {!state.initial_pairing_done && !config.cookie_configured && <label>同账号的 Cookie<input type="text" autoComplete="off" spellCheck={false} maxLength={16384} placeholder="A2=…; 其他 Cookie…" value={pairCookie} onChange={e => setPairCookie(e.target.value)} /></label>}
-          <p className="caption">{state.initial_pairing_done ? `首次配对时有 ${state.initial_unread_count} 条未读。重新配对保留上次推送的 API 首条 ID，后续按网页未读数和首条 ID 判断提醒。` : '首次配对会用 Cookie 校验账号并读取首页未读数；后续检查确认 API 首条 ID 后，有未读时发送一条汇总提醒。Cookie 加密保存在这台服务器，后续定时读取首页未读数，不发送给推送服务。'} 更换接收设备会停止旧连接的待处理事件。</p>
-          {(!state.verified || state.auth_blocked) && <p className="notice">请先在下方保存有效的 V2EX Token，账号验证通过后即可配对。</p>}
-          <button type="button" className="primary section-action" disabled={busy || !pairCode || (!state.initial_pairing_done && !config.cookie_configured && !pairCookie) || !state.verified || state.auth_blocked} onClick={() => void action(async () => {
-            try { await api(accountPath('pair'), 'POST', { code: pairCode, cookie: pairCookie }) } finally { setPairCookie('') }
-            setPairCode(''); await loadSavedConfig('pairing'); await refresh(true); setMessage('接收设备已配对。有初始未读时，汇总提醒的处理结果可在「推送历史」查看。')
-          })}>{busy ? '处理中…' : '配对设备'}</button>
-        </section>
-        <form className="settings" onSubmit={save}>
-        <section className="panel"><h2>V2EX 连接</h2><p className="muted">Token 只用于这台服务器访问官方 API。本配置仅属于当前选中的 V2EX 账号。</p>
-          <SecretField label="个人 API Token" value={draft.api_token} disabled={busy || configLoading} placeholder="粘贴 Personal Access Token" onChange={value => setDraft({ ...draft, api_token: value })} />
-          <TokenHelp />
-          <p className="caption">已保存的凭据已回填，可显示、复制或编辑；留空保存仍保留原值。更新 Token 后会重新验证账号。其他账号请使用「添加账号」，不能用另一账号的 Token 覆盖当前配置。</p>
-          <SecretField label="网页 Cookie" value={draft.cookie} maxLength={16384} disabled={busy || configLoading} placeholder="A2=…; 其他 Cookie…" onChange={value => setDraft({ ...draft, cookie: value })} />
-          <p className="caption">网页未读大于 0 时，API 首条消息 ID 与上次推送不同才提醒一次；Cookie 用于读取 V2EX 首页的未读总数。Cookie 加密保存在此服务器，仅发往 V2EX 首页，不打开通知列表，不执行已读操作。网页读取失败时暂停本轮汇总，绝不把缺失计数当作 0。</p>
-          <dl className="details credential-checks"><div><dt>Token 最近验证</dt><dd>{time(state.token_checked_at)}</dd></div><div><dt>Cookie 最近验证</dt><dd>{time(state.cookie_checked_at)}</dd></div></dl>
-          <p className="caption">凭据失效时会在工作台和账号管理中提醒；更新后按额度和冷却重新验证。没有通知 API 请求时，每 24 小时额外检查一次 Token，网页未读为 0 也能发现失效。</p>
-          <label className="short-field">期望检查间隔（秒）<input type="number" min={30} max={86400} required disabled={busy || configLoading} value={draft.interval_seconds} onChange={e => setDraft({ ...draft, interval_seconds: Number(e.target.value) })} /></label>
-        </section>
-        <div className="save-bar"><label className="checkbox"><input type="checkbox" disabled={busy || configLoading} checked={draft.enabled} onChange={e => setDraft({ ...draft, enabled: e.target.checked })} />启用同步与上报</label><button className="primary" disabled={busy}>{busy ? '保存中…' : '保存设置'}</button></div>
-      </form>
-        <section className="panel danger-zone"><h2>移除当前账号</h2><p className="muted">删除此账号在助手中的凭据和本地通知记录，并停止同步与上报。其他账号不受影响。接收设备上的推送连接可在设备端关闭。</p>
-          {confirmRemove ? <div className="section-heading"><span>确认移除 {state.username ? `@${state.username}` : '此待验证账号'}？</span><button className="danger-button" type="button" disabled={busy} onClick={() => void action(onRemove)}>确认移除</button><button type="button" disabled={busy} onClick={() => setConfirmRemove(false)}>取消</button></div> : <button className="danger-button" type="button" disabled={busy} onClick={() => setConfirmRemove(true)}>移除账号</button>}
-        </section>
-      </div>}
-
-      {tab === 'proxy' && configLoaded && <form className="settings" onSubmit={event => {
-        event.preventDefault()
-        void action(async () => {
-          await api(accountPath('proxy'), 'PUT', proxyDraft)
-          refreshVersion.current++
-          await loadSavedConfig('proxy')
-          await refresh(true); setMessage('代理设置已保存，下一次请求生效。')
+    setBusy(true)
+    setError('')
+    try {
+      if (!authenticated) {
+        await api('login', 'POST', { token: credential })
+        await refreshAccounts()
+      } else {
+        const result = await api<{ id: string }>('accounts', 'POST', {
+          api_token: credential,
+          cookie: newCookie,
+          ...newProxy,
         })
-      }}>
-        <section className="panel"><h2>网络代理</h2><p className="muted">用于当前账号访问 V2EX、定期首页未读检查，以及推送服务的配对、上报和回执查询。</p>
-          <label>连接方式<select value={proxyDraft.proxy_mode} disabled={busy} onChange={e => { setProxyResult(null); setProxyDraft({ ...proxyDraft, proxy_mode: e.target.value as ProxyMode }) }}>
-            <option value="environment">使用环境变量代理</option><option value="direct">直接连接</option><option value="custom">自定义 HTTP / HTTPS 代理</option>
-          </select></label>
-          {proxyDraft.proxy_mode === 'custom' && <>
-            <SecretField label="代理地址" value={proxyDraft.proxy_url} required={!config.proxy_url_configured} placeholder="http://用户名:密码@代理主机:端口" disabled={busy || configLoading} onChange={value => { setProxyResult(null); setProxyDraft({ ...proxyDraft, proxy_url: value }) }} />
-            {config.proxy_url_configured && <p className="caption">已保存地址：{config.proxy_address}（上方可查看含认证信息的完整地址）</p>}
-            <p className="caption">支持 http:// 和 https://，无需认证时省略用户名和密码。密码中的 @、: 等特殊字符请使用 URL 百分号编码。代理不可用时不会自动改为直连。</p>
-          </>}
-          <p className="caption">环境变量模式读取运行进程的 HTTP_PROXY、HTTPS_PROXY 和 NO_PROXY。直连模式忽略这些变量。保存后下一次请求生效，上报冷却与额度等待仍然保留。</p>
-        </section>
-        <div className="save-bar">
-          <button type="button" disabled={busy || (proxyDraft.proxy_mode === 'custom' && !proxyDraft.proxy_url.trim() && !config.proxy_url_configured)} onClick={() => void action(async () => {
-            setProxyResult(null)
-            const result = await api<ProxyResult>(accountPath('proxy/test'), 'POST', proxyDraft)
-            if (active.current) setProxyResult(result)
-          })}>{busy ? '处理中…' : '测试连接'}</button>
-          <button type="submit" className="primary" disabled={busy}>保存代理设置</button>
+        await refreshAccounts()
+        navigate(accountHref(result.id))
+        setNewCookie('')
+        setNewProxy(emptyProxy)
+      }
+      setCredential('')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '保存失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+  async function logout() {
+    await api('logout', 'POST', {})
+    sessionExpired()
+  }
+  async function removeAccount(id: string) {
+    try {
+      await api(`accounts/${encodeURIComponent(id)}`, 'DELETE', {})
+      await refreshAccounts()
+    } catch (e) {
+      if (e instanceof APIError && e.status === 401) sessionExpired()
+      throw e
+    }
+  }
+  if (authenticated === null)
+    return (
+      <LoginLayout>
+        <div className="login-panel">
+          {listError ? (
+            <>
+              <p className="notice error" role="alert">
+                {listError}
+              </p>
+              <button onClick={() => void refreshAccounts()}>重新连接</button>
+            </>
+          ) : (
+            <p role="status">正在连接通知助手…</p>
+          )}
         </div>
-        <p className="caption">测试使用当前填写的连接方式，不会保存草稿。分别检查 V2EX 和 V2Echo 推送服务，不携带账号凭据；每个账号每分钟可测试一次。</p>
-        {proxyResult && <section className="panel" aria-live="polite"><h2>连接测试结果</h2><p className="caption">{time(proxyResult.tested_at)} · {{environment:'环境变量代理',direct:'直接连接',custom:'自定义代理'}[proxyResult.proxy_mode]}</p>
-          <ul className="delivery-list">{proxyResult.checks.map(check => <li key={check.url}>
-            <div><strong>{check.name}</strong><span className={`status-pill ${!check.connected || check.http_status >= 400 ? 'warning' : ''}`}>{check.connected ? `${check.latency_ms} ms · HTTP ${check.http_status}` : '未连通'}</span></div>
-            <p>{check.message}</p><small>{check.url}</small>
-          </li>)}</ul>
-        </section>}
-      </form>}
+      </LoginLayout>
+    )
+  const connectionForm = (
+    <form className={authenticated ? 'add-account' : 'login-panel'} onSubmit={submit}>
+      <header className={authenticated ? 'page-header' : undefined}>
+        <div>
+          <h1>{authenticated ? '添加 V2EX 账号' : '连接你的通知助手'}</h1>
+          <p className={authenticated ? 'page-description' : 'muted'}>
+            {authenticated
+              ? '验证同账号的 API Token 与网页 Cookie，验证通过后保存。'
+              : '输入服务器数据目录 admin-token 文件中的管理密钥。'}
+          </p>
+        </div>
+        {authenticated && accounts.length > 0 && (
+          <button
+            className="text-button"
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              navigate('#/accounts')
+              setCredential('')
+              setNewCookie('')
+              setNewProxy({ proxy_mode: 'environment', proxy_url: '' })
+              setError('')
+            }}
+          >
+            返回账号管理
+          </button>
+        )}
+      </header>
+      {authenticated ? (
+        <>
+          <h2 className="add-connection-title">服务器连接</h2>
+          <label>
+            验证与同步的连接方式
+            <select
+              value={newProxy.proxy_mode}
+              disabled={busy}
+              onChange={(e) => setNewProxy({ proxy_mode: e.target.value as ProxyMode, proxy_url: '' })}
+            >
+              <option value="environment">使用环境变量代理</option>
+              <option value="custom">自定义 HTTP / HTTPS 代理</option>
+              <option value="direct">直接连接</option>
+            </select>
+          </label>
+          {newProxy.proxy_mode === 'custom' && (
+            <>
+              <SecretField
+                label="代理地址"
+                value={newProxy.proxy_url}
+                onChange={(value) => setNewProxy({ ...newProxy, proxy_url: value })}
+                required
+                disabled={busy}
+                maxLength={4096}
+                placeholder="http://代理主机:端口"
+              />
+              <p className="caption">
+                填写 notifier 服务器可访问的代理地址；需要认证时使用
+                http://用户名:密码@主机:端口，密码中的特殊字符需进行 URL 编码。
+              </p>
+            </>
+          )}
+          <p className="caption">
+            可选环境变量、直连、自定义 HTTP / HTTPS 代理。自定义时显示代理地址输入框。
+          </p>
+          <SecretField
+            label="V2EX API Token"
+            value={credential}
+            onChange={setCredential}
+            required
+            disabled={busy}
+            placeholder="粘贴 Personal Access Token"
+          />
 
-      {tab === 'pushTest' && <PushTest username={state.username} enabled={config.enabled} verified={state.verified && !state.auth_blocked} paired={relayReady} blocked={snapshot.relay_blocked} busy={busy} nextSync={snapshot.relay_next_sync} state={snapshot.push_test} onSettings={() => setTab('settings')} onHistory={() => setTab('pushHistory')} onSend={() => void action(async () => {
-        if (!testRequestID.current) testRequestID.current = Array.from(crypto.getRandomValues(new Uint8Array(32)), byte => byte.toString(16).padStart(2, '0')).join('')
-        await api(accountPath('push-test'), 'POST', { event_id: testRequestID.current })
-        testRequestID.current = ''
-        await refresh(true)
-        setMessage('测试请求已保存，请查看下方处理结果，并在 App 端确认是否收到消息。')
-      })} />}
+          <SecretField
+            label="同账号的网页 Cookie"
+            value={newCookie}
+            onChange={setNewCookie}
+            required
+            disabled={busy}
+            maxLength={16384}
+            placeholder="粘贴完整 Cookie 请求头，需包含 A2"
+          />
+          <p className="caption">
+            两项均为必填，用户名需完全一致（区分大小写）。验证通过后，凭据加密保存在此服务器。
+          </p>
+        </>
+      ) : (
+        <SecretField
+          label="管理密钥"
+          value={credential}
+          onChange={setCredential}
+          required
+          disabled={busy}
+          placeholder="输入服务器管理密钥"
+        />
+      )}
 
-      {tab === 'pushHistory' && <PushHistory loadPage={loadDeliveries} username={state.username} />}
-
-      {tab === 'history' && <>
-        <section className="panel"><h2>本地通知</h2><p className="muted">显示最近 50 条，所有已同步记录保存在本机 SQLite。这里不判断消息已读状态，也不表示已推送；当前未读总数以 V2EX 网页为准。</p><NotificationList items={notifications} /></section>
-      </>}
-    </main>
-  </div>
-}
-
-function NotificationList({ items }: { items: Snapshot['notifications'] }) {
-  if (!items.length) return <p className="empty">尚无通知。配置并启用连接后，历史记录会分批出现在这里。</p>
-  return <ul className="notification-list">{items.map(n => <li key={n.id}><div><h3>{n.title || 'V2EX 提醒'}</h3><time>{time(n.created)}</time></div>{n.body && <p>{n.body}</p>}<small>通知 #{n.id}</small></li>)}</ul>
+      {(error || listError) && (
+        <p className="notice error" role="alert">
+          {error || listError}
+        </p>
+      )}
+      <button className="primary" disabled={busy}>
+        {busy ? (authenticated ? '正在验证账号…' : '处理中…') : authenticated ? '验证并保存账号' : '进入管理页'}
+      </button>
+      {authenticated ? <div className="add-footnotes"><p className="caption">验证连接立即生效；成功后与账号一起保存，之后可在网络代理中修改。</p><p className="caption">验证失败会显示具体原因，并保留已填内容。</p></div> : <p className="caption">一个管理密钥可管理这里的全部账号，<br />请只交给可信的管理员。</p>}
+      {authenticated && (
+        <aside className="add-help">
+          <h2>准备凭据</h2>
+          <h3>API Token</h3>
+          <p className="caption">Scope 选择 Everything；建议有效期 180 天。</p><a className="text-link token-help-link" href="https://v2ex.com/settings/tokens" target="_blank" rel="noopener noreferrer">前往 V2EX 生成 ↗</a>
+          <h3>网页 Cookie</h3>
+          <p className="caption">
+            从已登录 V2EX 的浏览器复制完整 Cookie 请求头，需包含 A2。两项凭据必须属于同一个账号。
+          </p>
+        </aside>
+      )}
+    </form>
+  )
+  if (!authenticated) return <LoginLayout>{connectionForm}</LoginLayout>
+  const exists = accounts.some((a) => a.id === selected)
+  return (
+    <Shell accounts={accounts} accountID={exists ? selected : (accounts[0]?.id ?? '')} route={route} onLogout={logout}>
+      {listError && (
+        <p className="notice error" role="alert">
+          {listError}
+          <button onClick={() => void refreshAccounts()}>重试</button>
+        </p>
+      )}
+      {adding ? (
+        connectionForm
+      ) : route.kind === 'accounts' ? (
+        <AccountManager
+          accounts={accounts}
+          error=""
+          onAdd={() => navigate('#/accounts/new')}
+          onOpen={(id) =>
+            navigate(
+              accountHref(
+                id,
+                accounts.find((a) => a.id === id && (a.token_issue || a.cookie_issue || !a.cookie_configured))
+                  ? 'credentials'
+                  : 'settings',
+              ),
+            )
+          }
+          onRemove={removeAccount}
+        />
+      ) : route.kind === 'workspace' && exists ? (
+        <AccountWorkspace
+          key={selected}
+          accountID={selected}
+          tab={route.page}
+          onExpired={sessionExpired}
+          onRemove={async () => {
+            await removeAccount(selected)
+            navigate('#/accounts', true)
+          }}
+        />
+      ) : route.kind === 'home' ? (
+        <p role="status">正在打开工作台…</p>
+      ) : (
+        <section className="empty">
+          <h1>{route.kind === 'workspace' ? '账号不存在或已移除' : '找不到这个页面'}</h1>
+          <p>请从账号管理重新打开工作台。</p>
+          <a className="button" href="#/accounts">
+            前往账号管理
+          </a>
+        </section>
+      )}
+    </Shell>
+  )
 }

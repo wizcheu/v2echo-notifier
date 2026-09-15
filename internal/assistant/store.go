@@ -90,6 +90,7 @@ func OpenStore(dir string) (*Store, error) {
 	_, err = db.Exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY CHECK(id=1), body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS sync_state (id INTEGER PRIMARY KEY CHECK(id=1), body TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS check_history (id INTEGER PRIMARY KEY AUTOINCREMENT, body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS notifications (
         account_id INTEGER NOT NULL, id INTEGER NOT NULL, created INTEGER NOT NULL,
         title TEXT NOT NULL, body TEXT NOT NULL, raw TEXT NOT NULL,
@@ -154,7 +155,7 @@ func (s *Store) unseal(text string) (string, error) {
 }
 
 func (s *Store) Config() (Config, error) {
-	c := Config{IntervalSeconds: 180, ProxyMode: "environment"}
+	c := Config{IntervalSeconds: 180, ProxyMode: "environment", PushSchedule: defaultPushSchedule()}
 	var raw string
 	err := s.DB.QueryRow("SELECT body FROM settings WHERE id=1").Scan(&raw)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -165,6 +166,9 @@ func (s *Store) Config() (Config, error) {
 	}
 	if err = json.Unmarshal([]byte(raw), &c); err != nil {
 		return c, err
+	}
+	if c.PushSchedule == nil {
+		c.PushSchedule = defaultPushSchedule()
 	}
 	if c.APIToken, err = s.unseal(c.APIToken); err != nil {
 		return c, err
@@ -216,6 +220,12 @@ func (s *Store) SaveConfig(c Config, v State, retryBlocked bool, retireOld ...bo
 }
 
 func (s *Store) saveConfig(c Config, v State, retryBlocked, retireOld bool, initial *Event) error {
+	if c.PushSchedule == nil {
+		c.PushSchedule = defaultPushSchedule()
+	}
+	if err := c.PushSchedule.validate(); err != nil {
+		return err
+	}
 	c.Cookie = s.seal(c.Cookie)
 	c.APIToken = s.seal(c.APIToken)
 	c.RelayToken = s.seal(c.RelayToken)
@@ -371,7 +381,7 @@ func (s *Store) EraseAccount() error {
 		return err
 	}
 	defer tx.Rollback()
-	for _, table := range []string{"settings", "sync_state", "notifications", "outbox", "delivery_history", "push_test_schedule", "pending_pairing", "relay_schedule"} {
+	for _, table := range []string{"settings", "sync_state", "notifications", "outbox", "delivery_history", "check_history", "push_test_schedule", "pending_pairing", "relay_schedule"} {
 		if _, err = tx.Exec("DELETE FROM " + table); err != nil {
 			return err
 		}

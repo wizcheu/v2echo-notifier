@@ -35,17 +35,26 @@ type syncResponse struct {
 // Credentials/config edits share relayMu. Schedule lives separately from API
 // collection state and survives restart, re-pairing and configuration changes.
 func (e *Engine) Deliver(ctx context.Context, now time.Time) error {
+	entered := time.Now()
 	e.relayMu.Lock()
 	defer e.relayMu.Unlock()
 	if e.removed {
 		return ErrAccountRemoved
 	}
+	effectiveNow := now.Add(time.Since(entered))
 	cfg, err := e.Store.Config()
 	if err != nil {
 		return err
 	}
-	if !cfg.Enabled || cfg.RelayURL == "" || cfg.RelayToken == "" {
+	if !cfg.Enabled || cfg.RelayURL == "" || cfg.RelayToken == "" || !cfg.allowsPush(effectiveNow) {
 		return nil
+	}
+	ctx, cancel := cfg.windowContext(ctx, effectiveNow)
+	defer cancel()
+	windowStart, _, _ := cfg.schedule().window(effectiveNow)
+	st, err := e.Store.State()
+	if err != nil {
+		return err
 	}
 	var next int64
 	var failures int
@@ -95,6 +104,11 @@ func (e *Engine) Deliver(ctx context.Context, now time.Time) error {
 			if err = e.Store.SaveDelivery(d); err != nil {
 				return err
 			}
+			continue
+		}
+		// Recheck current unread state before resuming automatic pushes. Tests
+		// and receipt lookups do not depend on an upstream notification check.
+		if !d.Submitted && ev.Type != "test" && !windowStart.IsZero() && st.LastSuccess.Before(windowStart) {
 			continue
 		}
 		if d.Submitted {

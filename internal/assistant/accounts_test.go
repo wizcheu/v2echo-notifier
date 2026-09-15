@@ -50,7 +50,7 @@ func seedTestAccount(t *testing.T, a *Accounts, pat, cookie string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SaveConfig(Config{APIToken: pat, Cookie: cookie, Enabled: true, IntervalSeconds: 180}, State{Phase: "history", Page: 1}, false); err != nil {
+	if err := s.SaveConfig(Config{PushSchedule: allDaySchedule(), APIToken: pat, Cookie: cookie, Enabled: true, IntervalSeconds: 180}, State{Phase: "history", Page: 1}, false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := a.DB.Exec("INSERT INTO managed_accounts(id) VALUES(?)", id); err != nil {

@@ -347,6 +347,9 @@ func (a *Accounts) collect(ctx context.Context, now time.Time, cursor *int) erro
 	if err != nil {
 		return err
 	}
+	if !cfg.Enabled || !cfg.allowsPush(now) {
+		return nil
+	}
 	if canReadWeb(cfg, st) {
 		return e.Step(ctx, now)
 	}
@@ -375,7 +378,7 @@ func (a *Accounts) collect(ctx context.Context, now time.Time, cursor *int) erro
 			if err != nil {
 				return err
 			}
-			if c.Enabled && canReadWeb(c, s) && s.CookieIssue == "" && !now.Before(s.NextWeb) && !now.Before(s.NextCheck) {
+			if c.Enabled && c.allowsPush(now) && canReadWeb(c, s) && s.CookieIssue == "" && !now.Before(s.NextWeb) && !now.Before(s.NextCheck) {
 				return candidate.Step(ctx, now)
 			}
 		}

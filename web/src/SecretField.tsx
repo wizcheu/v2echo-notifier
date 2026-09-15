@@ -1,4 +1,5 @@
 import { useId, useRef, useState } from 'react'
+import Icon from './Icon'
 
 export default function SecretField({ label, value, onChange, placeholder, maxLength = 4096, disabled = false, readOnly = false, required = false }: {
   label: string; value: string; onChange?: (value: string) => void; placeholder?: string
@@ -40,7 +41,7 @@ export default function SecretField({ label, value, onChange, placeholder, maxLe
   }
 
   return <div className="secret-field">
-    <label htmlFor={id}>{label}</label>
+    <label htmlFor={id}>{label}{required && <span className="required-marker" aria-hidden="true"> · 必填</span>}</label>
     <div className="secret-field-controls">
       <input ref={input} id={id} type={visible ? 'text' : 'password'} value={value} autoComplete="off" spellCheck={false}
         placeholder={placeholder} maxLength={maxLength} disabled={disabled} readOnly={readOnly} required={required}
@@ -48,7 +49,7 @@ export default function SecretField({ label, value, onChange, placeholder, maxLe
         onChange={event => { setFeedback(''); onChange?.(event.target.value) }} />
       <div className="secret-field-actions">
         <button type="button" disabled={disabled || !value} aria-controls={id} aria-pressed={visible}
-          aria-label={`${visible ? '隐藏' : '显示'}${label}`} onClick={() => setVisible(v => !v)}>{visible ? '隐藏' : '显示'}</button>
+          aria-label={`${visible ? '隐藏' : '显示'}${label}`} onClick={() => setVisible(v => !v)}><Icon name={visible ? 'eye_close' : 'eye'} /></button>
         <button type="button" disabled={disabled || !value} aria-label={`复制${label}`} onClick={() => void copy()}>复制</button>
       </div>
     </div>

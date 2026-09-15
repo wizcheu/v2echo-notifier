@@ -12,18 +12,17 @@ import (
 )
 
 type Engine struct {
-	proxyTestMu   sync.Mutex
-	proxyTestNext time.Time
-	network       *accountTransport
-	Budget        *APIBudget
-	ClaimAccount  func(Member) error
-	removed       bool
-	Store         *Store
-	API           *V2EX
-	Relay         *http.Client
-	Web           *http.Client
-	mu            sync.Mutex
-	relayMu       sync.Mutex
+	proxyTestMu  sync.Mutex
+	network      *accountTransport
+	Budget       *APIBudget
+	ClaimAccount func(Member) error
+	removed      bool
+	Store        *Store
+	API          *V2EX
+	Relay        *http.Client
+	Web          *http.Client
+	mu           sync.Mutex
+	relayMu      sync.Mutex
 }
 
 func NewEngine(s *Store) *Engine {
@@ -51,6 +50,13 @@ func (e *Engine) configure(c Config, preservePairing bool) error {
 	}
 	old, err := e.Store.Config()
 	if err != nil {
+		return err
+	}
+	// Omitted schedules preserve the account setting for credential edits and older clients.
+	if c.PushSchedule == nil {
+		c.PushSchedule = old.PushSchedule
+	}
+	if err := c.schedule().validate(); err != nil {
 		return err
 	}
 	if preservePairing {
@@ -117,6 +123,9 @@ func (e *Engine) configure(c Config, preservePairing bool) error {
 		}
 	}
 	st.NextCheck = time.Time{}
+	if !c.Enabled || c.schedule() != old.schedule() {
+		st.CheckRequested = false
+	}
 	changed := c.RelayToken != old.RelayToken || c.RelayURL != old.RelayURL
 	if err = e.Store.SaveConfig(c, st, changed, changed && old.RelayToken != ""); err != nil {
 		return err
@@ -127,21 +136,37 @@ func (e *Engine) configure(c Config, preservePairing bool) error {
 	return nil
 }
 
-func (e *Engine) RequestCheck() error {
+func (e *Engine) RequestCheck() error { return e.requestCheck(time.Now()) }
+
+func (e *Engine) requestCheck(now time.Time) error {
+	entered := time.Now()
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.removed {
 		return ErrAccountRemoved
+	}
+	effectiveNow := now.Add(time.Since(entered))
+	cfg, err := e.Store.Config()
+	if err != nil {
+		return err
+	}
+	if !cfg.Enabled {
+		return ErrSyncDisabled
+	}
+	if !cfg.allowsPush(effectiveNow) {
+		return quietHoursError(cfg, effectiveNow)
 	}
 	st, err := e.Store.State()
 	if err != nil {
 		return err
 	}
 	st.NextCheck = time.Time{}
+	st.CheckRequested = true
 	return e.Store.SaveState(st) // Never override NextAPI, Retry-After or auth failures.
 }
 
-func (e *Engine) Step(ctx context.Context, now time.Time) error {
+func (e *Engine) Step(ctx context.Context, now time.Time) (result error) {
+	entered := time.Now()
 	// Coalescing unsent summaries must not race delivery's read/reserve step.
 	e.relayMu.Lock()
 	defer e.relayMu.Unlock()
@@ -150,13 +175,16 @@ func (e *Engine) Step(ctx context.Context, now time.Time) error {
 	if e.removed {
 		return ErrAccountRemoved
 	}
+	effectiveNow := now.Add(time.Since(entered))
 	cfg, err := e.Store.Config()
 	if err != nil {
 		return err
 	}
-	if !cfg.Enabled || cfg.APIToken == "" {
+	if !cfg.Enabled || cfg.APIToken == "" || !cfg.allowsPush(effectiveNow) {
 		return nil
 	}
+	ctx, cancel := cfg.windowContext(ctx, effectiveNow)
+	defer cancel()
 	st, err := e.Store.State()
 	if err != nil {
 		return err
@@ -231,13 +259,24 @@ func (e *Engine) Step(ctx context.Context, now time.Time) error {
 		return e.Store.SaveState(st)
 	}
 
+	check := newCheckRecord(&st, now, "api")
+	check.Web.Detail = "未配置网页 Cookie，旧版 API 同步不提供网页未读总数"
+	if err = e.Store.SaveState(st); err != nil {
+		return err
+	}
+	start := time.Now()
+	defer e.Store.finishCheck(&check, start, &result)
 	var page Page
 	headers, err = e.requestAPI(ctx, cfg.APIToken, fmt.Sprintf("notifications?p=%d", st.Page), &page, now)
 	st.Quota.Observe(headers, now)
 	st.NextAPI = now.Add(st.Quota.Delay(now))
 	if err != nil {
+		check.API = failedCheckStage(err, start, "API 请求失败，请检查网络或响应格式")
+		check.Summary = check.API.Detail
 		return e.recordFailure(st, headers, err, now)
 	}
+	check.API = CheckStage{Status: "failed", HTTPStatus: 200, DurationMS: time.Since(start).Milliseconds(), Detail: "API 数据校验未通过，保留原有同步进度"}
+	check.Summary = check.API.Detail
 	st.tokenValid(now)
 	for i, n := range page.Items {
 		if n.ID <= 0 || n.ForMemberID != st.AccountID || n.Created <= 0 {
@@ -255,6 +294,18 @@ func (e *Engine) Step(ctx context.Context, now time.Time) error {
 		st.LastPageMinID = oldest
 	}
 	isHistory := st.Phase == "history"
+	check.Status = "completed"
+	check.API.Status = "completed"
+	check.API.Detail = fmt.Sprintf("第 %d 页返回 %d 条通知；通知条数不等于网页未读总数", st.Page, len(page.Items))
+	check.Summary = fmt.Sprintf("API 第 %d 页同步完成", st.Page)
+	check.Outcome = "本轮已同步通知；符合提醒条件的事件可在推送历史查看"
+	if isHistory {
+		check.Outcome = "导入历史通知，本轮不创建上报事件"
+	}
+	if len(page.Items) > 0 {
+		first := page.Items[0].ID
+		check.FirstID = &first
+	}
 	if isHistory && !st.AnchorSet {
 		if len(page.Items) > 0 {
 			st.AnchorID = page.Items[0].ID
