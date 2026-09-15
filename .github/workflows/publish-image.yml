@@ -5,6 +5,17 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "镜像标签（例如 edge、0.1.0 或 latest）"
+        type: string
+        required: true
+        default: edge
+      publish_latest:
+        description: "同时更新 latest（将本次构建提供给正式用户）"
+        type: boolean
+        required: true
+        default: false
 
 permissions:
   contents: read
@@ -25,6 +36,17 @@ jobs:
       packages: write
 
     steps:
+      - name: Validate manual image tag
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+        shell: bash
+        run: |
+          if [[ ! "$IMAGE_TAG" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127}$ ]]; then
+            echo '::error::镜像标签需为 1–128 个字母、数字、下划线、点或连字符，且不能以点或连字符开头。'
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@v6
         with:
@@ -52,13 +74,15 @@ jobs:
           images: ${{ env.IMAGE_NAME }}
           tags: |
             type=semver,pattern={{version}},enable=${{ github.event_name == 'push' }}
-            type=raw,value=edge,enable=${{ github.event_name == 'workflow_dispatch' }}
+            type=raw,value=${{ inputs.image_tag }},enable=${{ github.event_name == 'workflow_dispatch' }}
+            type=raw,value=latest,enable=${{ github.event_name == 'workflow_dispatch' && inputs.publish_latest }}
             type=sha
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.description=V2Echo 自托管通知助手
 
       - name: Build and push
+        id: build
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -69,3 +93,25 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Show pull commands
+        env:
+          IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        shell: bash
+        run: |
+          {
+            echo '## 镜像已发布'
+            echo
+            echo '支持 linux/amd64 和 linux/arm64。按本次实际发布的标签拉取：'
+            echo
+            echo '```sh'
+            while IFS= read -r image; do
+              [[ -z "$image" ]] || printf 'docker pull %s\n' "$image"
+            done <<< "$IMAGE_TAGS"
+            echo '```'
+            echo
+            printf 'Digest: `%s`\n' "$IMAGE_DIGEST"
+            echo
+            echo '首次发布后，请在 GitHub Packages 的 Package settings 中将包设为 Public，才能匿名拉取。'
+          } >> "$GITHUB_STEP_SUMMARY"

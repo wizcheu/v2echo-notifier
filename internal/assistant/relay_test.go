@@ -25,6 +25,29 @@ func relayFixture(t *testing.T) (*Engine, time.Time) {
 	return NewEngine(s), now
 }
 
+func TestRelayWithoutPairingDoesNotSend(t *testing.T) {
+	e, now := relayFixture(t)
+	cfg, err := e.Store.Config()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.RelayToken = ""
+	if err := e.Store.SaveConfig(cfg, stateOf(t, e.Store), false); err != nil {
+		t.Fatal(err)
+	}
+	var pending int
+	if err := e.Store.DB.QueryRow("SELECT COUNT(*) FROM outbox WHERE status='pending'").Scan(&pending); err != nil || pending == 0 {
+		t.Fatalf("expected pending events to exercise unpaired delivery guard: count=%d err=%v", pending, err)
+	}
+	e.Relay = &http.Client{Transport: transportFunc(func(*http.Request) (*http.Response, error) {
+		t.Fatal("unpaired notifier must not submit events or query S2S receipts")
+		return nil, errors.New("unexpected S2S request")
+	})}
+	if err := e.Deliver(context.Background(), now); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRelayTimeoutReplaysThenPollsPendingReceipt(t *testing.T) {
 	e, now := relayFixture(t)
 	calls := 0

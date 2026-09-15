@@ -1,8 +1,10 @@
 # 通知同步契约
 
+[返回 README](../README.md) · [使用指南](user-guide.md)
+
 ## 数据与身份
 
-数据来源为 `https://www.v2ex.com/api/v2/`，使用 Bearer PAT。请求不跟随重定向，不把 PAT 转发到其他服务。首次或 Token 更新后读取 `member` 验证身份；每条通知的 `for_member_id` 必须匹配当前账号。失效 Token 只暂停对应账号，避免不断重试。每个配置有独立数据库与加密密钥，历史、基线、高水位、错误退避及上报队列不跨账号；全局索引确保同一 V2EX member ID 只有一个有效配置。
+网页模式由 V2EX 首页提供未读总数，以 `https://www.v2ex.com/api/v2/` 首条消息 ID 判断是否需要提醒；未配置 Cookie 的旧账号保留 API 同步模式。API 请求使用 Bearer PAT。请求不跟随重定向，不把 PAT 转发到其他服务。首次或 Token 更新后读取 `member` 验证身份；每条通知的 `for_member_id` 必须匹配当前账号。失效 Token 只暂停对应账号，避免不断重试。每个配置有独立数据库与加密密钥，历史、基线、高水位、错误退避及上报队列不跨账号；全局索引确保同一 V2EX member ID 只有一个有效配置。
 
 SQLite 的通知主键为 `(account_id, notification_id)`，保存原始 JSON 与供管理页显示的纯文本。正文不在浏览器以 HTML 执行。ID 使用 Go `int64` 和 SQLite INTEGER。
 
@@ -46,6 +48,12 @@ SQLite 的通知主键为 `(account_id, notification_id)`，保存原始 JSON �
 
 此快速停止算法依赖“通知 ID 随新事件递增、API 按 ID 倒序返回”的假设，官方文档未明确承诺这一行为。代码验证页内倒序以及跨页向更早 ID 推进，失败时保留进度并报错，不静默继续；迟到的较小 ID 不在当前增量算法的完整性保证范围内。
 
+## 每日推送时段
+
+每天按固定 UTC+8 执行一个账号独立时段，默认 08:00–24:00；支持跨午夜及全天运行。开始包含、结束不包含。同步关闭或处于休息时段时不发起自动检查、凭据巡检、推送及回执查询；手动检查和新建测试同样受限。恢复时先检查最新未读，保留既有额度、退避、冷却和有效期，不补跑错过的轮次。用户操作与例外见 [推送与休息时段](user-guide.md#推送与休息时段)。
+
+配置字段 `push_schedule` 为 `{"mode":"window","start":"08:00","end":"24:00"}`，`mode` 可为 `window` 或 `all_day`。`PUT /api/accounts/{id}/config` 未提交该字段时保留原值，凭据编辑不会重置时段；配置与重启前状态保存在账号自己的 SQLite。状态接口返回 `push_schedule_status`，包含固定时区、服务端当前时间、是否休息、下次开始及当前时段结束时间，供网页展示恢复提示。休息期间请求检查或新建测试返回 HTTP 409。
+
 ## 动态额度
 
 读取 `X-Rate-Limit-Limit`、`X-Rate-Limit-Remaining`、`X-Rate-Limit-Reset`，仅接受三者完整且合理的值。额度可能按出口 IP 共享，整个实例以 `accounts.db` 中的持久化预算统一限流，不给每个 PAT 分配完整额度。只有共享窗口允许请求时才推进账号轮转，避免固定轮转与额度间隔重合导致账号饥饿；同步与上报使用独立轮转。
@@ -73,7 +81,7 @@ S2S 使用独立于 V2EX API 的调度状态。每个账号的 `relay_schedule` 
 
 HTTP CONNECT 的代理认证与目标站点认证分离；代理失败不自动改用直连，仍进入原有失败处理与额度调度。独立代理配置接口只保存代理字段，保留账号凭据、同步状态、API 额度与上报等待时间；连接设置接口省略代理字段时保留原代理。
 
-管理页的「测试连接」使用未保存的代理草稿创建独立临时连接池，并行 GET `https://www.v2ex.com/` 与 `https://app.v2echo.com/api/push/v1/health`，各自 8 秒超时，不跟随重定向；自定义地址留空则复用已保存地址。仅测试网络连通性，不携带账号认证、不调用 V2EX API、不提交事件或查询回执。返回 HTTP 状态与响应耗时，错误消息不包含代理认证信息。该手动操作有每账号每分钟一次的进程内限制，不修改持久化 API / S2S 预算，重启后可重新测试。
+管理页的「测试连接」使用未保存的代理草稿创建独立临时连接池，并行 GET `https://www.v2ex.com/` 与 `https://app.v2echo.com/api/push/v1/health`，各自 8 秒超时，不跟随重定向；自定义地址留空则复用已保存地址。仅测试网络连通性，不携带账号认证、不调用 V2EX API、不提交事件或查询回执。返回 HTTP 状态与响应耗时，错误消息不包含代理认证信息。同一账号同时只进行一次连接测试，完成或取消后可立即重试，无固定冷却；不修改持久化 API / S2S 预算。
 
 ## 主动推送测试
 
@@ -81,11 +89,19 @@ HTTP CONNECT 的代理认证与目标站点认证分离；代理失败不自动�
 
 测试不访问 V2EX、不改同步阶段或通知基线。它沿用正常 S2S 队列、代理与回执调度；有效期、限额和文案见 [S2S v1](s2s-protocol.md)。管理页的常规设置保存只修改 V2EX 与同步配置，保留配对凭据；配对目标固定为官方服务，管理 API 拒绝手动覆盖地址或发送 Token。
 
+## 管理接口与账号隔离
+
+管理密钥可访问此实例的全部账号，账号选择器用于管理配置，不是不同管理员的权限隔离。管理接口均显式携带配置 ID：`GET /api/accounts`、`POST /api/accounts`、`DELETE /api/accounts/{id}`，以及 `/api/accounts/{id}/status`、`config`、`pair`、`check`。新增接口 `POST /api/accounts` 必须包含非空 `api_token` 与含 A2 的 `cookie`，可同时提交 `proxy_mode` 与 `proxy_url`（默认使用环境变量代理，自定义模式必须填写地址）；服务端同步验证 API 与网页身份，成功保存后才返回 201。不存在隐式默认账号。
+
 ## 已保存配置读取
 
 `GET /api/accounts/{accountID}/config` 返回当前账号解密后的配置，复用管理会话、请求校验头与来源检查，响应禁止缓存。设置页按需请求；状态轮询仍只返回凭据配置标志和脱敏代理地址。前端将保存值回填，Token、Cookie、代理地址默认遮蔽并可显示、复制，发送 Token 只读。保存时仅提交当前表单可编辑字段，不把读取到的发送凭据用于覆盖配对。
 
 配置保存在当前账号表单内存中，切换账号或退出后卸载；轮询不覆盖草稿，代理与连接设置分别回填保存结果。读取只访问本地存储，不触发上游请求或修改额度。
+
+## 本地检查记录
+
+`GET /api/accounts/{accountID}/check-history` 通过管理会话与来源校验后读取当前账号最近 50 条实际检查记录。`check_history` 写入时按本地 ID 删除超出保留数量的旧记录；休息时段，以及仅等待额度而未实际发起请求的轮次不补录；网页已读取而 API 等待额度时仍记录本次观察。字段包含起止时间、触发方式、网页与 API 阶段、观察值及上报决定；缺失未读数使用 null，与 0 区分。记录不包含凭据、请求地址或上游响应正文。用户展示规则见 [检查记录](user-guide.md#检查记录)。
 
 ## 本地推送历史
 
@@ -100,6 +116,8 @@ HTTP CONNECT 的代理认证与目标站点认证分离；代理失败不自动�
 - `internal/assistant/accounts.go`：账号索引、隔离存储、移除与轮转。
 - `internal/assistant/budget.go`：实例共享的请求预算。
 - `internal/assistant/engine.go`：单账号同步阶段与错误状态。
+- `internal/assistant/push_schedule.go`：UTC+8 每日时段校验、边界判断及状态。
+- `internal/assistant/check_history.go`：最近 50 条检查记录及管理接口。
 - `internal/assistant/credentials.go`：低频 Token 检查及凭据验证时间。
 - `web/src/AccountManager.tsx`：账号管理、移除确认及凭据更新入口。
 - `internal/assistant/web_monitor.go`：网页计数与 API 首条 ID 联合检查。
