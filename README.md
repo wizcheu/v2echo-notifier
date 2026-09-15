@@ -65,6 +65,47 @@ npm run test:browser
 
 ## Docker
 
+### 直接使用 GHCR 镜像
+
+镜像发布地址为 `ghcr.io/wizcheu/v2echo-notifier`，支持 `linux/amd64` 和 `linux/arm64`，Docker 会按宿主机架构选择对应镜像。首次正式版本构建成功并将镜像包设为 Public 后，即可匿名拉取，无需下载源码或自行构建。
+
+在部署目录创建 `compose.yaml`：
+
+```yaml
+services:
+  notifier:
+    image: ghcr.io/wizcheu/v2echo-notifier:latest
+    restart: unless-stopped
+    ports:
+      - "8282:8282"
+    volumes:
+      - notifier-data:/data
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+volumes:
+  notifier-data:
+```
+
+启动并读取管理密钥：
+
+```sh
+docker compose pull
+docker compose up -d
+docker compose exec notifier /notifier -data /data -print-admin-token
+```
+
+打开 `http://<宿主机地址>:8282` 登录。`latest` 指向最近发布的正式版本；需要固定版本时，将标签替换为已发布版本（例如 `0.1.0`）。`edge` 是手动构建的测试版本，不会更新 `latest`。
+
+更新镜像时再次执行 `docker compose pull` 和 `docker compose up -d`。从源码构建迁移时，在原 `compose.yaml` 中用 `image:` 替换整个 `build:` 块；保留原 Compose 项目名称、部署目录和 `notifier-data:/data` 卷映射，继续使用原有配置与历史。不要执行会删除数据卷的 `docker compose down -v`。
+
+### 从源码构建
+
+仓库自带的 `compose.yaml` 使用本地 Dockerfile，适合开发或自定义构建。在仓库目录执行：
+
 ```sh
 docker compose up -d --build
 docker compose exec notifier /notifier -data /data -print-admin-token
@@ -88,7 +129,9 @@ docker compose up -d --build
 
 代理运行在另一台电脑上时，需允许局域网访问，并使用该电脑的局域网 IP；构建容器中的 `127.0.0.1` 指向容器自身。`HTTPS_PROXY` 的值可使用 `http://`，表示通过 HTTP 代理隧道访问 HTTPS。这些参数用于构建步骤；拉取基础镜像所需的代理应另行配置到 Docker daemon 或 BuildKit，运行中的服务也不自动继承构建代理。详见 [Docker 构建代理参数](https://docs.docker.com/build/building/variables/#proxy-arguments)。
 
-默认使用 Docker 命名卷持久化 `/data`，通过 `8282:8282` 将容器端口发布到宿主机，可在局域网访问 `http://<宿主机地址>:8282`。也可通过 SSH 转发访问：
+### 数据与访问
+
+上述两种部署方式均使用 Docker 命名卷持久化 `/data`，通过 `8282:8282` 将容器端口发布到宿主机，可在局域网访问 `http://<宿主机地址>:8282`。也可通过 SSH 转发访问：
 
 ```sh
 ssh -L 8282:127.0.0.1:8282 user@your-server
@@ -97,6 +140,39 @@ ssh -L 8282:127.0.0.1:8282 user@your-server
 也可在用户自己的 HTTPS 反向代理后运行，并设置 `ECHO_SECURE_COOKIE=true`。代理需保留原 Host；接口校验 Origin 与自定义请求头。不要把未加密的管理接口直接暴露到公网。
 
 根目录 `data/accounts.db` 保存账号索引与共享请求额度；每个账号的数据存入 `data/accounts/<随机配置ID>/notifier.db`，PAT、网页 Cookie 与推送凭据使用该目录下的 `encryption.key` 做 AES-GCM 加密。此加密不防止拿到整个数据目录的攻击者；备份必须保护整个卷，凭据文件不应加入源码或日志。单个数据目录只运行一个助手进程。当前账号数据库格式为 4，不自动转换旧开发版数据库；格式不兼容时请使用新的数据目录。
+
+## 在 GitHub 上构建与发布镜像
+
+[Publish Docker image](.github/workflows/publish-image.yml) 工作流使用现有 Dockerfile 编译网页与 Go 服务，然后发布双架构镜像到 `ghcr.io/<仓库所有者>/<仓库名>`。本仓库的镜像名为 `ghcr.io/wizcheu/v2echo-notifier`。认证使用 GitHub 自动提供的 `GITHUB_TOKEN`，发布任务声明 `contents: read` 和 `packages: write`，无需额外配置 Docker Hub 凭据或个人 Token。
+
+首次使用时，将工作流提交并推送到默认分支。在仓库 **Actions → Publish Docker image → Run workflow** 选择需要构建的分支（通常为 `main`），可发布 `edge` 测试镜像；日志在对应的 Actions 运行中查看。仅推送普通代码提交不会发布镜像。
+
+正式发布时，先确保待发布代码与工作流已推送，再创建并推送一个未使用过的语义版本标签。例如：
+
+```sh
+git push origin main
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+标签与镜像的对应关系：
+
+| 触发方式 | 镜像标签 |
+| --- | --- |
+| 推送正式标签 `v0.1.0` | `0.1.0`、`latest`、`sha-<提交短哈希>` |
+| 推送预发布标签 `v0.2.0-rc.1` | `0.2.0-rc.1`、`sha-<提交短哈希>`；不更新 `latest` |
+| 手动运行工作流 | `edge`、`sha-<提交短哈希>`；不更新 `latest` |
+
+`v*` 标签应遵循语义版本格式。正式发布应按版本顺序进行，重跑旧正式标签也会更新 `latest`。镜像只有在 Actions 构建和上传成功后才可拉取。
+
+首次上传后，进入 GitHub **Packages → v2echo-notifier → Package settings → Change visibility**，将包设为 **Public**，用户才可匿名拉取；源码仓库公开不代表镜像包自动公开。如果同名包已存在且上传遇到权限错误，在包设置的 **Manage Actions access** 中给当前仓库写入权限。详见 [GitHub 的容器镜像发布与权限说明](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)。
+
+发布后可检查双架构清单并拉取指定版本：
+
+```sh
+docker buildx imagetools inspect ghcr.io/wizcheu/v2echo-notifier:0.1.0
+docker pull ghcr.io/wizcheu/v2echo-notifier:0.1.0
+```
 
 ## 账号管理与凭据提醒
 
