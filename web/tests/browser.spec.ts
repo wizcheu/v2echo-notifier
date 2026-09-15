@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test'
 import type { Page } from '@playwright/test'
 
 // All endpoints are intercepted. These accounts, credentials and events are synthetic.
-async function fixture(page: Page, options: { authenticated?: boolean; empty?: boolean; blocked?: boolean; resting?: boolean } = {}) {
+async function fixture(page: Page, options: { authenticated?: boolean; empty?: boolean; blocked?: boolean; resting?: boolean; pairingBlocked?: boolean } = {}) {
   let authenticated = options.authenticated ?? true
   const writes: { path: string; body: any }[] = []
   const errors: string[] = []
@@ -152,7 +152,7 @@ async function fixture(page: Page, options: { authenticated?: boolean; empty?: b
         },
         push_schedule_status: { timezone: 'UTC+8', server_time: '2026-09-14T18:00:00Z', resting: Boolean(options.resting && config.enabled), next_start: '2026-09-15T00:00:00Z', window_end: '' },
         relay_next_sync: 1900000000,
-        relay_blocked: false,
+        relay_blocked: Boolean(options.pairingBlocked),
         pending_count: 2,
         notification_count: 2,
         notifications: [
@@ -545,4 +545,18 @@ test('pausing sync preserves the saved schedule even with an unfinished time edi
   await expect(page.getByRole('status')).toContainText('同步仍处于暂停状态')
   expect(writes.at(-1)?.body).toMatchObject({ enabled: false, push_schedule: { mode: 'window', start: '08:00', end: '24:00' } })
   await expect(page.getByLabel('允许推送 · 开始')).toHaveValue('08:00')
+})
+
+
+test('invalid pairing pauses checks and links to device recovery', async ({ page }) => {
+  const { writes } = await fixture(page, { pairingBlocked: true })
+  await page.goto('/#/accounts/a/overview')
+  await expect(page.getByRole('heading', { name: '需重新配对，检查已暂停' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '立即检查', exact: true })).toHaveCount(0)
+  await page.getByRole('link', { name: '重新配对设备', exact: true }).click()
+  await expect(page).toHaveURL(/settings\/device/)
+  await expect(page.getByText('接收设备需重新配对，自动检查与推送已暂停。', { exact: true })).toBeVisible()
+  await page.goto('/#/accounts/a/overview/runtime')
+  await expect(page.getByRole('button', { name: '立即检查', exact: true })).toBeDisabled()
+  expect(writes.filter(write => write.path.endsWith('/check'))).toHaveLength(0)
 })

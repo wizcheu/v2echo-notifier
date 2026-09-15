@@ -119,6 +119,7 @@ func (e *Engine) Pair(ctx context.Context, relayURL, code, cookie string) error 
 	changed := cfg.RelayURL != relayURL || cfg.RelayToken != token
 	retire := changed && cfg.RelayToken != ""
 	cfg.RelayURL, cfg.RelayToken = relayURL, token
+	st.CheckRequested = false
 
 	if unread != nil {
 		st.CookieIssue = ""

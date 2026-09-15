@@ -183,7 +183,7 @@ func (s *Server) Handler() http.Handler {
 	}))
 	mux.HandleFunc("POST /api/accounts/{accountID}/check", s.account(func(e *Engine, w http.ResponseWriter, r *http.Request) {
 		if err := e.RequestCheck(); err != nil {
-			if errors.Is(err, ErrQuietHours) || errors.Is(err, ErrSyncDisabled) {
+			if errors.Is(err, ErrQuietHours) || errors.Is(err, ErrSyncDisabled) || errors.Is(err, ErrPairingRequired) {
 				fail(w, 409, err.Error())
 				return
 			}

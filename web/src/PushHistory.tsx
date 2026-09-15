@@ -30,7 +30,7 @@ const statuses: Record<string, string> = {
   pending: '待处理',
   apns_accepted: 'APNs 已接收',
   rejected: '已拒绝',
-  blocked: '需更新凭据',
+  blocked: '需重新配对',
   expired: '已过期',
   skipped: '已跳过',
 }

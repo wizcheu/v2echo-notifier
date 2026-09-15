@@ -350,6 +350,9 @@ func (a *Accounts) collect(ctx context.Context, now time.Time, cursor *int) erro
 	if !cfg.Enabled || !cfg.allowsPush(now) {
 		return nil
 	}
+	if blocked, err := e.Store.RelayBlocked(); err != nil || blocked {
+		return err
+	}
 	if canReadWeb(cfg, st) {
 		return e.Step(ctx, now)
 	}
@@ -379,6 +382,13 @@ func (a *Accounts) collect(ctx context.Context, now time.Time, cursor *int) erro
 				return err
 			}
 			if c.Enabled && c.allowsPush(now) && canReadWeb(c, s) && s.CookieIssue == "" && !now.Before(s.NextWeb) && !now.Before(s.NextCheck) {
+				blocked, err := candidate.Store.RelayBlocked()
+				if err != nil {
+					return err
+				}
+				if blocked {
+					continue
+				}
 				return candidate.Step(ctx, now)
 			}
 		}

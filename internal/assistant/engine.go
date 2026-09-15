@@ -140,6 +140,8 @@ func (e *Engine) RequestCheck() error { return e.requestCheck(time.Now()) }
 
 func (e *Engine) requestCheck(now time.Time) error {
 	entered := time.Now()
+	e.relayMu.Lock()
+	defer e.relayMu.Unlock()
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.removed {
@@ -152,6 +154,11 @@ func (e *Engine) requestCheck(now time.Time) error {
 	}
 	if !cfg.Enabled {
 		return ErrSyncDisabled
+	}
+	if blocked, err := e.Store.RelayBlocked(); err != nil {
+		return err
+	} else if blocked {
+		return ErrPairingRequired
 	}
 	if !cfg.allowsPush(effectiveNow) {
 		return quietHoursError(cfg, effectiveNow)
@@ -182,6 +189,9 @@ func (e *Engine) Step(ctx context.Context, now time.Time) (result error) {
 	}
 	if !cfg.Enabled || cfg.APIToken == "" || !cfg.allowsPush(effectiveNow) {
 		return nil
+	}
+	if blocked, err := e.Store.RelayBlocked(); err != nil || blocked {
+		return err
 	}
 	ctx, cancel := cfg.windowContext(ctx, effectiveNow)
 	defer cancel()

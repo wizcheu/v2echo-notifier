@@ -3,6 +3,7 @@ package assistant
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand/v2"
@@ -280,6 +281,14 @@ func (e *Engine) Deliver(ctx context.Context, now time.Time) error {
 		}
 	}
 	return e.Store.saveRelayRound(active, next, failures)
+}
+
+var ErrPairingRequired = errors.New("接收设备需重新配对，自动检查与推送已暂停")
+
+func (s *Store) RelayBlocked() (bool, error) {
+	var blocked bool
+	err := s.DB.QueryRow("SELECT blocked FROM relay_schedule WHERE id=1").Scan(&blocked)
+	return blocked, err
 }
 
 func (s *Store) saveRelayRound(deliveries []Delivery, next int64, failures int) error {

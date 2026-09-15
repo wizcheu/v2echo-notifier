@@ -280,7 +280,8 @@ export default function AccountWorkspace({
   const resumeText = `${resumeAt}（UTC+8）恢复检查与推送`
   const configured = config.api_token_configured
   const relayReady = Boolean(config.relay_url === pushServiceURL && config.relay_token_configured)
-  const phase = state.token_issue
+  const pairingBlocked = snapshot.relay_blocked
+  const phase = pairingBlocked ? '需重新配对，检查已暂停' : state.token_issue
     ? '需要更新 API Token'
     : state.cookie_issue
       ? '需要更新 Cookie'
@@ -302,7 +303,7 @@ export default function AccountWorkspace({
   const pair = () => void action(async () => {
     try { await api(accountPath('pair'), 'POST', { code: pairCode, cookie: pairCookie }) } finally { setPairCookie('') }
     setPairCode(''); await loadSavedConfig(configLoaded ? 'pairing' : 'all'); await refresh(true)
-    setMessage('接收设备已配对。有初始未读时，汇总提醒的处理结果可在「推送历史」查看。')
+    setMessage('接收设备已配对，将按同步开关、推送时段和现有额度继续检查与上报。')
   })
   const settingsTabs = (
     <nav className="settings-tabs" aria-label="设置分类">
@@ -332,6 +333,12 @@ export default function AccountWorkspace({
           </a>
         )}
       </header>}
+      {pairingBlocked && tab !== 'overview' && (
+        <div className="notice" role="status">
+          <span>接收设备需重新配对，自动检查与推送已暂停。</span>
+          {tab !== 'device' && <a className="text-link" href={href('device')}>重新配对设备</a>}
+        </div>
+      )}
       {connectionError && (
         <div className="notice error" role="alert">
           <span>{connectionError}</span>
@@ -427,17 +434,17 @@ export default function AccountWorkspace({
           )}
           <div className="overview-content">
           <section className={`health-summary ${resting ? 'resting-summary' : ''}`}>
-            <Icon name={resting ? 'moon' : state.auth_blocked || state.cookie_issue ? 'lock' : 'check_circle'} />
+            <Icon name={pairingBlocked ? 'lock' : resting ? 'moon' : state.auth_blocked || state.cookie_issue ? 'lock' : 'check_circle'} />
             <div>
-              <h2>{resting ? '休息时段，暂不打扰' : phase}</h2>
-              {resting ? <><p>自动检查已暂停 · 推送已暂停</p><p className="caption">{resumeText} · {scheduleDescription(schedule)}</p></> : <><p><span className="desktop-title">最近检查完成于 {time(state.last_success)} · 下次允许检查 {resting ? resumeText : config.enabled && !state.auth_blocked && !state.cookie_issue ? time(next) : '等待启用或更新凭据'}</span><span className="mobile-title">最近完成 {formatTime(state.last_success, false).replace('今天 ', '')} · 下次允许 {formatTime(next, false).replace('今天 ', '')}</span></p>
+              <h2>{pairingBlocked ? phase : resting ? '休息时段，暂不打扰' : phase}</h2>
+              {pairingBlocked ? <><p>自动检查与推送已暂停，旧连接无法继续接收新提醒。</p><p className="caption">在 App 中生成新的配对码，重新配对后按同步开关与推送时段恢复。</p></> : resting ? <><p>自动检查已暂停 · 推送已暂停</p><p className="caption">{resumeText} · {scheduleDescription(schedule)}</p></> : <><p><span className="desktop-title">最近检查完成于 {time(state.last_success)} · 下次允许检查 {config.enabled && !state.auth_blocked && !state.cookie_issue ? time(next) : '等待启用或更新凭据'}</span><span className="mobile-title">最近完成 {formatTime(state.last_success, false).replace('今天 ', '')} · 下次允许 {formatTime(next, false).replace('今天 ', '')}</span></p>
               <p className="caption">
                 {config.enabled ? '同步已启用' : '同步已暂停'}，
                 {snapshot.relay_blocked ? '接收设备需要重新配对' : relayReady ? '接收设备已配对' : '接收设备尚未配对'}。
               </p></>}
             </div>
-            {resting ? <a className="button" href={href('sync')}>调整推送时段</a> : <button
-              disabled={busy || resting || !config.enabled || state.auth_blocked || Boolean(state.cookie_issue)}
+            {pairingBlocked ? <a className="button" href={href('device')}>重新配对设备</a> : resting ? <a className="button" href={href('sync')}>调整推送时段</a> : <button
+              disabled={busy || pairingBlocked || resting || !config.enabled || state.auth_blocked || Boolean(state.cookie_issue)}
               onClick={() =>
                 void action(async () => {
                   await api(accountPath('check'), 'POST', {})
@@ -478,11 +485,9 @@ export default function AccountWorkspace({
                 {snapshot.relay_blocked ? '需重新配对' : relayReady ? '已配对' : '尚未配对'}
               </h3>
               <p className="caption">
-                {resting ? `${resumeText}，恢复后先检查最新未读。` : !relayReady || !config.enabled
+                {pairingBlocked ? '自动检查与推送已暂停，请重新配对接收设备。' : resting ? `${resumeText}，恢复后先检查最新未读。` : !relayReady || !config.enabled
                   ? '完成配对并启用后开始上报。'
-                  : snapshot.relay_blocked
-                    ? '凭据失效，请重新配对接收设备。'
-                    : snapshot.relay_next_sync * 1000 > Date.now()
+                  : snapshot.relay_next_sync * 1000 > Date.now()
                       ? `下次允许通信 ${time(snapshot.relay_next_sync)}`
                       : '有待处理事件时上报，至少 3 分钟一轮。'}
               </p>
@@ -519,7 +524,7 @@ export default function AccountWorkspace({
             <div className="section-heading">
               <h2>当前账号的检查</h2>
               <button
-                disabled={busy || resting || !config.enabled || state.auth_blocked || Boolean(state.cookie_issue)}
+                disabled={busy || pairingBlocked || resting || !config.enabled || state.auth_blocked || Boolean(state.cookie_issue)}
                 onClick={() =>
                   void action(async () => {
                     await api(accountPath('check'), 'POST', {})
@@ -546,7 +551,7 @@ export default function AccountWorkspace({
               <div>
                 <dt>下次允许检查</dt>
                 <dd>
-                  {resting ? resumeText : config.enabled && !state.auth_blocked && !state.cookie_issue ? time(next) : '等待启用或更新凭据'}
+                  {pairingBlocked ? '重新配对后恢复' : resting ? resumeText : config.enabled && !state.auth_blocked && !state.cookie_issue ? time(next) : '等待启用或更新凭据'}
                 </dd>
               </div>
               <div>
@@ -657,7 +662,7 @@ export default function AccountWorkspace({
             </div>
             <div className="credential-update-link"><p className="muted">显示、复制或替换凭据；留空保存保留原值。</p><a className="button primary" href={href('credentials')}><span className="desktop-title">更新凭据</span><span className="mobile-title">查看或更新凭据</span></a></div>
           </section>
-          <section className="mobile-only mobile-setting-section"><h2>接收设备</h2><h3>@{state.username} · {relayReady ? '已配对' : '尚未配对'}</h3><p className="muted">重新配对、查看发送 Token 或发送测试。</p><a className="button" href={href('device')}>管理接收设备</a></section>
+          <section className="mobile-only mobile-setting-section"><h2>接收设备</h2><h3>@{state.username} · {pairingBlocked ? '需重新配对' : relayReady ? '已配对' : '尚未配对'}</h3><p className="muted">重新配对、查看发送 Token 或发送测试。</p><a className="button" href={href('device')}>管理接收设备</a></section>
           <section className="mobile-only mobile-setting-section"><h2>同步偏好</h2><h3>{config.enabled ? '已启用' : '已暂停'} · 期望每 {config.interval_seconds} 秒检查</h3><p className="muted">{scheduleDescription(schedule)}（UTC+8）；休息期间暂停检查与推送。</p><a className="button" href={href('sync')}>调整同步与网络</a></section>
           <section className="panel credential-explainer">
             <h2>凭据如何使用</h2>
@@ -702,7 +707,7 @@ export default function AccountWorkspace({
           </section>
           <section className="panel">
             <div className="section-heading">
-              <h2>{relayReady ? '更换接收设备' : '配对接收设备'}</h2>
+              <h2>{pairingBlocked ? '重新配对接收设备' : relayReady ? '更换接收设备' : '配对接收设备'}</h2>
             </div>
             <p className="muted">在接收设备的通知设置中生成配对码。两端需要使用同一个 V2EX 账号。</p>
             <div className="pairing-fields">
