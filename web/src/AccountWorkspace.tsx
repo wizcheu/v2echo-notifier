@@ -336,7 +336,7 @@ export default function AccountWorkspace({
       {pairingBlocked && tab !== 'overview' && (
         <div className="notice" role="status">
           <span>接收设备需重新配对，自动检查与推送已暂停。</span>
-          {tab !== 'device' && <a className="text-link" href={href('device')}>重新配对设备</a>}
+          <a className="text-link" href={href('device')}>重新配对设备</a>
         </div>
       )}
       {connectionError && (
