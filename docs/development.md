@@ -26,7 +26,7 @@ cd web
 npm run dev
 ```
 
-Vite 把 `/api` 代理到本地 Go 服务。React 构建产物通过 `go:embed` 打入正式可执行文件；修改前端后重新执行 `make build`。
+Vite 把 `/api` 与 `/browser-desktop/`（含 WebSocket）代理到本地 Go 服务。React 构建产物通过 `go:embed` 打入正式可执行文件；修改前端后重新执行 `make build`。
 
 ## 验证
 
@@ -49,20 +49,23 @@ npm run test:browser
 
 ## 发布容器镜像
 
-工作流为 [Publish Docker image](../.github/workflows/publish-image.yml)，自动发布到 `ghcr.io/<仓库所有者>/<仓库名>`，构建 `linux/amd64` 和 `linux/arm64`。使用 GitHub 自动提供的 `GITHUB_TOKEN`，无需填写 Docker Hub 账号、密码或额外的发布密钥。
+工作流为 [Publish Docker image](../.github/workflows/publish-image.yml)，notifier 发布到 `ghcr.io/<仓库所有者>/<仓库名>`，browser 发布到独立的 `ghcr.io/<仓库所有者>/<仓库名>-browser`，构建 `linux/amd64` 和 `linux/arm64`。使用 GitHub 自动提供的 `GITHUB_TOKEN`，无需填写 Docker Hub 账号、密码或额外的发布密钥。
 
 将工作流提交并推送到默认分支后，可在 GitHub 的 **Actions → Publish Docker image → Run workflow** 选择构建分支及参数：
 
 | 参数 | 用途 |
 | --- | --- |
+| 构建组件 `component` | 默认 `notifier`；选择 `browser` 只构建浏览器镜像，选择 `all` 构建两者 |
 | 镜像标签 `image_tag` | 默认 `edge`；可填 `0.1.0` 等版本号，也可直接填 `latest` |
 | 同时更新 latest `publish_latest` | 默认关闭；勾选后会在填写的标签之外发布 `latest` |
 
 例如：填写 `0.1.0` 并勾选同时更新 latest，会发布 `:0.1.0`、`:latest` 和用于追溯提交的 `:sha-*`；沿用默认参数只发布 `:edge` 和 `:sha-*`。手动填写的镜像版本号不会自动创建 Git 标签或 GitHub Release。准备正式提供给用户的构建才更新 `latest`。
 
-推送正式语义版本 Git 标签（例如 `v0.1.0`）也会自动发布 `:0.1.0` 和 `:latest`；预发布标签（例如 `v0.2.0-rc.1`）不会自动更新 `latest`。成功后的工作流摘要会列出实际发布的标签、拉取命令及镜像 digest。
+只发布 browser 时，选择 `component=browser`、`image_tag=edge`，保持 `publish_latest` 关闭。本仓库会生成 `ghcr.io/wizcheu/v2echo-notifier-browser:edge`，不会构建或更新 notifier；部署时通过 `ECHO_BROWSER_IMAGE` 选择该标签。首次配套发布可选择 `component=all`，同时构建两个镜像。Fork 仓库时，镜像地址随仓库所有者和仓库名变化。
 
-首次发布的 GitHub Package 默认是 Private。在包的 **Package settings → Change visibility** 中改为 **Public**，用户才能匿名拉取；仓库公开不代表镜像包自动公开。
+推送正式语义版本 Git 标签（例如 `v0.1.0`）会同时构建 notifier 和 browser，并各自自动发布 `:0.1.0` 和 `:latest`；预发布标签（例如 `v0.2.0-rc.1`）不会自动更新 `latest`。成功后的工作流摘要会列出实际发布的标签、拉取命令及镜像 digest。
+
+两个镜像分别拥有自己的 GitHub Package。首次发布的 GitHub Package 默认是 Private。在包的 **Package settings → Change visibility** 中改为 **Public**，用户才能匿名拉取；仓库公开不代表镜像包自动公开。
 
 遇到 `manifest unknown` 时，先核对工作流摘要中的标签。例如只做过默认手动构建时，应使用 `docker pull ghcr.io/wizcheu/v2echo-notifier:edge`；需要 `latest` 则按上述参数重新发布。重跑旧工作流不会增加新的输入参数，需先推送更新后的工作流，再点击 Run workflow。
 
@@ -83,3 +86,11 @@ npm run test:browser
 ## 接口与源码入口
 
 管理接口的账号隔离、鉴权、配置读取和调度规则见 [同步契约](synchronization.md)，接收设备兑换流程见 [配对接口](pairing.md)，事件上传和回执格式见 [S2S 协议](s2s-protocol.md)。
+
+## 浏览器兼容模式测试
+
+```sh
+python3 -m unittest discover -s browser -p 'test_*.py'
+```
+
+Go 测试覆盖验证恢复、账号与管理会话隔离、失败不回退、代理变更清理、凭据加密、待验证新账号及推送基准不变；Python 测试覆盖首页导航边界、Cookie 域、认证 HTTPS 代理拒绝时不直连，以及避免读取上一次页面。容器启动、Selkies 画面与实际 Cloudflare 人工验证需在有 Docker 的环境另行验收，不能由这些合成测试推断。

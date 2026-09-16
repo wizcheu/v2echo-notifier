@@ -131,7 +131,7 @@ export default function App() {
           <h1>{authenticated ? '添加 V2EX 账号' : '连接你的通知助手'}</h1>
           <p className={authenticated ? 'page-description' : 'muted'}>
             {authenticated
-              ? '验证同账号的 API Token 与网页 Cookie，验证通过后保存。'
+              ? '验证同账号的 API Token 与网页 Cookie，完成通知连接。'
               : '输入服务器数据目录 admin-token 文件中的管理密钥。'}
           </p>
         </div>
@@ -206,7 +206,7 @@ export default function App() {
             placeholder="粘贴完整 Cookie 请求头，需包含 A2"
           />
           <p className="caption">
-            两项均为必填，用户名需完全一致（区分大小写）。验证通过后，凭据加密保存在此服务器。
+            两项均为必填，用户名需完全一致（区分大小写）。凭据加密保存在此服务器；API 身份已确认但首页遇到访问验证时，可先保存账号，按提示安装可选浏览器组件并继续验证。
           </p>
         </>
       ) : (
@@ -228,7 +228,7 @@ export default function App() {
       <button className="primary" disabled={busy}>
         {busy ? (authenticated ? '正在验证账号…' : '处理中…') : authenticated ? '验证并保存账号' : '进入管理页'}
       </button>
-      {authenticated ? <div className="add-footnotes"><p className="caption">验证连接立即生效；成功后与账号一起保存，之后可在网络代理中修改。</p><p className="caption">验证失败会显示具体原因，并保留已填内容。</p></div> : <p className="caption">一个管理密钥可管理这里的全部账号，<br />请只交给可信的管理员。</p>}
+      {authenticated ? <div className="add-footnotes"><p className="caption">验证连接立即生效；成功后与账号一起保存，之后可在网络代理中修改。</p><p className="caption">验证失败会显示具体原因；若已保存为待网页验证账号，请进入账号完成验证。</p></div> : <p className="caption">一个管理密钥可管理这里的全部账号，<br />请只交给可信的管理员。</p>}
       {authenticated && (
         <aside className="add-help">
           <h2>准备凭据</h2>

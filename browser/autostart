@@ -1,0 +1,3 @@
+#!/bin/sh
+# Started as the unprivileged desktop user with the compositor environment.
+exec /usr/bin/python3 /opt/v2echo-browser/bridge.py

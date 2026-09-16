@@ -2,6 +2,7 @@ import { useState } from 'react'
 import RemoveAccountDialog from './RemoveAccountDialog'
 
 export type Account = {
+  browser_required?: boolean
   id: string
   username: string
   member_id: number
@@ -28,7 +29,7 @@ export function TokenHelp() {
   )
 }
 
-const needsAttention = (a: Account) => Boolean(a.blocked || a.token_issue || a.cookie_issue || !a.cookie_configured)
+const needsAttention = (a: Account) => Boolean(a.browser_required || a.blocked || a.token_issue || a.cookie_issue || !a.cookie_configured)
 
 export default function AccountManager({
   accounts,
@@ -131,7 +132,7 @@ export default function AccountManager({
                     account.last_error !== account.token_issue &&
                     account.last_error !== account.cookie_issue && <p className="caption">{account.last_error}</p>}
                   <div className="account-actions">
-                    <button className={needsAttention(account) ? '' : 'text-button'} disabled={busy} onClick={() => onOpen(account.id)}>{needsAttention(account) ? '更新凭据' : '连接设置'}</button>
+                    <button className={needsAttention(account) ? '' : 'text-button'} disabled={busy} onClick={() => onOpen(account.id)}>{account.browser_required ? '处理访问验证' : needsAttention(account) ? '更新凭据' : '连接设置'}</button>
                     <button className="danger-button" disabled={busy} onClick={() => {setFailure('');setConfirm(account.id)}}>移除账号</button>
                   </div>
                 </section>

@@ -16,6 +16,8 @@ import type { Page } from './routes'
 import Icon from './Icon'
 import type { PushHistoryPage } from './PushHistory'
 import PushTest, { pushServiceURL } from './PushTest'
+import BrowserVerification from './BrowserVerification'
+import type { BrowserStatus } from './BrowserVerification'
 import type { PushTestState } from './PushTest'
 
 type ProxyMode = 'environment' | 'direct' | 'custom'
@@ -55,6 +57,7 @@ type State = {
   quota: { limit: number; remaining: number; reset: string; observed: boolean }
 }
 type Snapshot = {
+  browser?: BrowserStatus
   push_schedule_status: PushScheduleStatus
   push_test: PushTestState
   config: Config
@@ -364,6 +367,11 @@ export default function AccountWorkspace({
         </div>
       )}
 
+      {snapshot.browser && (snapshot.browser.required || snapshot.browser.enabled || (tab === 'proxy' && (
+        snapshot.browser.available || proxyResult?.checks.some(check => check.name === 'V2EX' && check.http_status === 403)
+      ))) && (
+        <BrowserVerification status={snapshot.browser} accountPath={accountPath} refresh={() => refresh(true)} onExpired={onExpired} />
+      )}
       {state.token_issue && !recovery && (
         <section className="notice error" role="alert">
           <div>
@@ -909,7 +917,7 @@ export default function AccountWorkspace({
             >
               {busy ? '处理中…' : '测试连接'}
             </button>
-            <p className="caption">测试不保存设置，也不携带账号凭据；测试完成后可立即重试。</p>
+            <p className="caption">测试不保存设置，不携带账号凭据，也不复用浏览器验证会话。V2EX 测试访问首页 https://www.v2ex.com/。</p>
           </div>
 
           {proxyResult && (
@@ -924,6 +932,9 @@ export default function AccountWorkspace({
                   <li key={check.url}><div className="proxy-check"><Icon name={check.connected && check.http_status < 400 ? 'check_circle' : 'time'} /><strong>{check.name}</strong><span>{check.connected ? `${check.latency_ms} ms · HTTP ${check.http_status}` : '未连通'}</span></div>{(!check.connected || check.http_status >= 400) && <p>{check.message}</p>}</li>
                 ))}
               </ul>
+              {proxyResult.checks.some(check => check.name === 'V2EX' && check.http_status === 403) && (
+                <p role="status">此结果只代表普通请求被拒绝；若浏览器已验证，请以“检查记录”中的实际首页读取结果为准。实际检查也受阻时，请按本页“浏览器验证”说明安装组件或打开验证窗口。</p>
+              )}
             </section>
           )}
           <div className="save-bar"><p className="caption">保存后下一次请求生效，已有冷却和额度等待继续保留。</p><button type="submit" className="primary" disabled={busy}>保存代理设置</button></div>

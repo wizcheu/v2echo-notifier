@@ -161,6 +161,11 @@ func (e *Engine) ConfigureProxy(input ProxyConfig) error {
 	if err != nil {
 		return err
 	}
+	if cfg.ProxyMode != resolved.Mode || cfg.ProxyURL != resolved.URL {
+		if err := e.invalidateBrowser(); err != nil {
+			return err
+		}
+	}
 	cfg.ProxyMode, cfg.ProxyURL = resolved.Mode, resolved.URL
 	if err = e.Store.SaveConfig(cfg, st, false); err != nil {
 		return err
@@ -233,7 +238,9 @@ func probeConnections(ctx context.Context, client *http.Client, targets []ProxyC
 					response.Body.Close()
 					results[i].Connected = true
 					results[i].Status = response.StatusCode
-					if response.StatusCode >= 200 && response.StatusCode < 300 {
+					if strings.EqualFold(response.Header.Get("cf-mitigated"), "challenge") {
+						results[i].Message = "网络已连通，普通请求触发 Cloudflare 验证。本测试不复用浏览器会话；实际首页也受阻时，可安装可选浏览器组件完成验证"
+					} else if response.StatusCode >= 200 && response.StatusCode < 300 {
 						results[i].Message = "连接成功"
 					} else {
 						results[i].Message = fmt.Sprintf("网络已连通，站点返回 HTTP %d", response.StatusCode)

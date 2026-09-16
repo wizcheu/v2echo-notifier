@@ -23,6 +23,7 @@ var profileID = regexp.MustCompile(`^[0-9a-f]{32}$`)
 // Each account owns its database and encryption key. The registry contains only
 // profile membership and the budget shared by this notifier's outbound calls.
 type Accounts struct {
+	Browser               *BrowserService
 	mu                    sync.Mutex
 	DB                    *sql.DB
 	dir                   string
@@ -33,6 +34,7 @@ type Accounts struct {
 }
 
 type AccountSummary struct {
+	BrowserRequired  bool   `json:"browser_required"`
 	ID               string `json:"id"`
 	Username         string `json:"username"`
 	MemberID         int64  `json:"member_id"`
@@ -122,6 +124,8 @@ func OpenAccounts(dir string) (*Accounts, error) {
 
 func (a *Accounts) attach(id string, e *Engine) {
 	e.Budget = a.Budget
+	e.Browser = a.Browser
+	e.profileID = id
 	e.ClaimAccount = func(member Member) error {
 		var owner string
 		err := a.DB.QueryRow("SELECT id FROM managed_accounts WHERE member_id=? AND deleted=0", member.ID).Scan(&owner)
@@ -198,14 +202,23 @@ func (a *Accounts) Add(ctx context.Context, token, cookie string, proxy ProxyCon
 		return "", errors.New("无法确认 API Token 所属账号，账号尚未保存")
 	}
 	snapshot, err := verifier.readWebUnread(ctx, cookie, member.Username)
+	pendingBrowser := false
 	if err != nil {
-		return "", err
+		problem, ok := errors.AsType[*webRequestError](err)
+		pendingBrowser = ok && problem.challenge
+		if !pendingBrowser {
+			return "", err
+		}
 	}
 	if err := ctx.Err(); err != nil {
 		return "", errors.New("账号验证已取消或超时，请重试")
 	}
 	st := State{AccountID: member.ID, Username: member.Username, Verified: true, Phase: "history", Page: 1,
 		CookieCheckedAt: snapshot.ObservedAt, HasWebUnread: true, WebUnreadCount: snapshot.Count, WebObservedAt: snapshot.ObservedAt}
+	if pendingBrowser {
+		st.HasWebUnread = false
+		st.LastError = "API 身份已确认，首页尚待浏览器验证；完成同账号校验后再配对并开启同步"
+	}
 	st.tokenValid(now)
 	st.Quota.Observe(headers, now)
 	if !st.Quota.Observed {
@@ -234,11 +247,18 @@ func (a *Accounts) Add(ctx context.Context, token, cookie string, proxy ProxyCon
 	if err != nil {
 		return "", err
 	}
-	err = s.SaveConfig(Config{APIToken: token, Cookie: cookie, ProxyMode: proxy.Mode, ProxyURL: proxy.URL, Enabled: true, IntervalSeconds: 180}, st, false)
+	err = s.SaveConfig(Config{APIToken: token, Cookie: cookie, ProxyMode: proxy.Mode, ProxyURL: proxy.URL, Enabled: !pendingBrowser, IntervalSeconds: 180}, st, false)
 	if err != nil {
 		_ = s.EraseAccount()
 		s.DB.Close()
 		return "", err
+	}
+	if pendingBrowser {
+		if err = s.saveBrowser(browserState{Required: true}); err != nil {
+			_ = s.EraseAccount()
+			s.DB.Close()
+			return "", err
+		}
 	}
 	if _, err = a.DB.Exec("INSERT INTO managed_accounts(id,member_id) VALUES(?,?)", id, member.ID); err != nil {
 		_ = s.EraseAccount()
@@ -269,7 +289,7 @@ func (a *Accounts) List() ([]AccountSummary, error) {
 		if err != nil {
 			return nil, err
 		}
-		result = append(result, AccountSummary{ID: id, Username: st.Username, MemberID: st.AccountID, Enabled: cfg.Enabled, Verified: st.Verified, Blocked: st.AuthBlocked || st.CookieIssue != "", CookieConfigured: cfg.Cookie != "", CookieVerified: !st.CookieCheckedAt.IsZero() && st.CookieIssue == "", TokenIssue: st.TokenIssue, CookieIssue: st.CookieIssue, LastError: st.LastError})
+		result = append(result, AccountSummary{BrowserRequired: e.browserStatus().Required, ID: id, Username: st.Username, MemberID: st.AccountID, Enabled: cfg.Enabled, Verified: st.Verified, Blocked: st.AuthBlocked || st.CookieIssue != "", CookieConfigured: cfg.Cookie != "", CookieVerified: !st.CookieCheckedAt.IsZero() && st.CookieIssue == "", TokenIssue: st.TokenIssue, CookieIssue: st.CookieIssue, LastError: st.LastError})
 	}
 	sort.Slice(result, func(i, j int) bool {
 		if result[i].Username == result[j].Username {
@@ -291,6 +311,24 @@ func (a *Accounts) Remove(id string) error {
 	defer e.relayMu.Unlock()
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if e.Browser != nil {
+		b := e.Browser
+		b.mu.Lock()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_, resetErr := b.call(ctx, "reset", browserRequest{Account: id})
+		cancel()
+		if b.owner == id {
+			b.releaseLocked()
+		}
+		b.mu.Unlock()
+		session, stateErr := e.Store.browserState()
+		if stateErr != nil {
+			return stateErr
+		}
+		if resetErr != nil && session.Enabled {
+			return errors.New("请先恢复浏览器容器，以清除该账号的活动会话后再移除")
+		}
+	}
 	// Persist the tombstone first; startup repeats erasure after any interruption.
 	if _, err := a.DB.Exec("UPDATE managed_accounts SET deleted=1,member_id=NULL WHERE id=?", id); err != nil {
 		return err

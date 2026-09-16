@@ -31,7 +31,7 @@ func assertNoAccountSaved(t *testing.T, a *Accounts) {
 }
 
 func TestOnboardingRequiresExactIdentityBeforePersisting(t *testing.T) {
-	for _, scenario := range []string{"same", "different", "case", "expired-token", "missing-username", "guest", "challenge", "cancelled", "redirect"} {
+	for _, scenario := range []string{"same", "different", "case", "expired-token", "missing-username", "guest", "cancelled", "redirect"} {
 		t.Run(scenario, func(t *testing.T) {
 			a, _ := testAccounts(t)
 			ctx, cancel := context.WithCancel(context.Background())
@@ -68,8 +68,6 @@ func TestOnboardingRequiresExactIdentityBeforePersisting(t *testing.T) {
 						return response(200, webPage("Tester", 3)), nil
 					case "guest":
 						return response(200, `<a class="top" href="/signin">Sign In</a>`), nil
-					case "challenge":
-						return response(403, "challenge"), nil
 					case "redirect":
 						res := response(302, "")
 						res.Header.Set("Location", "https://other.example/")

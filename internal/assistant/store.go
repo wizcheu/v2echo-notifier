@@ -88,6 +88,7 @@ func OpenStore(dir string) (*Store, error) {
 		return nil, errors.New("账号数据库格式不受此版本支持，请使用新的数据目录")
 	}
 	_, err = db.Exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
+      CREATE TABLE IF NOT EXISTS browser_session (id INTEGER PRIMARY KEY CHECK(id=1), body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY CHECK(id=1), body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS sync_state (id INTEGER PRIMARY KEY CHECK(id=1), body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS check_history (id INTEGER PRIMARY KEY AUTOINCREMENT, body TEXT NOT NULL);
@@ -381,7 +382,7 @@ func (s *Store) EraseAccount() error {
 		return err
 	}
 	defer tx.Rollback()
-	for _, table := range []string{"settings", "sync_state", "notifications", "outbox", "delivery_history", "check_history", "push_test_schedule", "pending_pairing", "relay_schedule"} {
+	for _, table := range []string{"browser_session", "settings", "sync_state", "notifications", "outbox", "delivery_history", "check_history", "push_test_schedule", "pending_pairing", "relay_schedule"} {
 		if _, err = tx.Exec("DELETE FROM " + table); err != nil {
 			return err
 		}

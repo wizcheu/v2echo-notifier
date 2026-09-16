@@ -60,6 +60,8 @@ func decode(w http.ResponseWriter, r *http.Request, target any) error {
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/browser-desktop/", s.authorized(s.browserDesktop))
+	mux.HandleFunc("POST /api/accounts/{accountID}/browser/{operation}", s.account(s.browserAction))
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
 	mux.HandleFunc("POST /api/login", s.login)
 	mux.HandleFunc("POST /api/logout", s.authorized(func(w http.ResponseWriter, r *http.Request) {
@@ -67,6 +69,13 @@ func (s *Server) Handler() http.Handler {
 		s.mu.Lock()
 		delete(s.sessions, c.Value)
 		s.mu.Unlock()
+		if b := s.Accounts.Browser; b != nil {
+			b.mu.Lock()
+			if b.viewer == c.Value {
+				b.releaseLocked()
+			}
+			b.mu.Unlock()
+		}
 		http.SetCookie(w, &http.Cookie{Name: "notifier_session", Value: "", Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: s.SecureCookies || r.TLS != nil, MaxAge: -1})
 		writeJSON(w, 200, map[string]bool{"ok": true})
 	}))
@@ -372,6 +381,7 @@ func (s *Server) status(e *Engine, w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, map[string]any{
 		"push_test":            pushTest,
+		"browser":              e.browserStatus(),
 		"push_schedule_status": cfg.scheduleStatus(time.Now().UTC()),
 		"account_id":           r.PathValue("accountID"),
 		"config":               map[string]any{"push_schedule": cfg.schedule(), "proxy_mode": cfg.ProxyMode, "proxy_url_configured": cfg.ProxyURL != "", "proxy_address": proxyAddress(cfg.ProxyURL), "enabled": cfg.Enabled, "interval_seconds": cfg.IntervalSeconds, "relay_url": cfg.RelayURL, "api_token_configured": cfg.APIToken != "", "relay_token_configured": cfg.RelayToken != "", "cookie_configured": cfg.Cookie != ""},

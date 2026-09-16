@@ -12,6 +12,8 @@ import (
 )
 
 type Engine struct {
+	Browser      *BrowserService
+	profileID    string
 	proxyTestMu  sync.Mutex
 	network      *accountTransport
 	Budget       *APIBudget
@@ -125,6 +127,11 @@ func (e *Engine) configure(c Config, preservePairing bool) error {
 	st.NextCheck = time.Time{}
 	if !c.Enabled || c.schedule() != old.schedule() {
 		st.CheckRequested = false
+	}
+	if c.Cookie != old.Cookie || c.ProxyMode != old.ProxyMode || c.ProxyURL != old.ProxyURL {
+		if err := e.invalidateBrowser(); err != nil {
+			return err
+		}
 	}
 	changed := c.RelayToken != old.RelayToken || c.RelayURL != old.RelayURL
 	if err = e.Store.SaveConfig(c, st, changed, changed && old.RelayToken != ""); err != nil {

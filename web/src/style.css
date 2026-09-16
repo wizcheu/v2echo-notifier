@@ -1022,3 +1022,8 @@ a.button.primary:hover { filter:brightness(.95); }
   .sync-settings .save-bar { margin-bottom:12px; }
   .sync-settings .sync-proxy .row-action { padding:8px 0; }
 }
+
+.browser-verification p { color: var(--muted); line-height: 1.6; }
+.browser-verification pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.browser-verification summary { cursor: pointer; }
+.browser-verification-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }

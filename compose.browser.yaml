@@ -1,0 +1,36 @@
+# docker compose -f compose.yaml -f compose.browser.yaml up -d --build
+services:
+  notifier:
+    environment:
+      ECHO_BROWSER_CONTROL_URL: http://browser:8090
+      ECHO_BROWSER_DESKTOP_URL: http://browser:3000
+      ECHO_BROWSER_TOKEN: ${ECHO_BROWSER_TOKEN:?Set a random shared browser token of at least 32 characters in .env}
+    depends_on:
+      - browser
+  browser:
+    build:
+      context: ./browser
+    restart: unless-stopped
+    shm_size: 1gb
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Asia/Shanghai
+      ECHO_BROWSER_TOKEN: ${ECHO_BROWSER_TOKEN:?Set ECHO_BROWSER_TOKEN in .env}
+      SUBFOLDER: /browser-desktop/
+      SELKIES_AUDIO_ENABLED: "false|locked"
+      SELKIES_MICROPHONE_ENABLED: "false|locked"
+      SELKIES_GAMEPAD_ENABLED: "false|locked"
+      SELKIES_CLIPBOARD_ENABLED: "false|locked"
+      SELKIES_COMMAND_ENABLED: "false|locked"
+      SELKIES_FILE_TRANSFERS: "none|locked"
+      SELKIES_ENABLE_SHARING: "false|locked"
+      SELKIES_UI_SIDEBAR_SHOW_APPS: "false|locked"
+      SELKIES_UI_SIDEBAR_SHOW_FILES: "false|locked"
+      SELKIES_UI_SIDEBAR_SHOW_SHARING: "false|locked"
+    # Live profile, desktop and browser caches are ephemeral. Durable V2EX
+    # cookies are encrypted in notifier-data, not a plaintext browser volume.
+    tmpfs:
+      - /config:mode=0700,uid=1000,gid=1000
+      - /tmp
+    # No published ports, Docker socket, host devices or privileged mode.

@@ -6,6 +6,15 @@ on:
       - "v*"
   workflow_dispatch:
     inputs:
+      component:
+        description: "构建组件（browser 可单独发布）"
+        type: choice
+        required: true
+        default: notifier
+        options:
+          - notifier
+          - browser
+          - all
       image_tag:
         description: "镜像标签（例如 edge、0.1.0 或 latest）"
         type: string
@@ -24,13 +33,17 @@ concurrency:
   group: publish-container
   cancel-in-progress: false
 
-env:
-  IMAGE_NAME: ghcr.io/${{ github.repository }}
-
 jobs:
   publish:
+    name: Publish ${{ matrix.component }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        component: ${{ fromJSON((github.event_name == 'push' || inputs.component == 'all') && '["notifier","browser"]' || inputs.component == 'browser' && '["browser"]' || '["notifier"]') }}
+    env:
+      IMAGE_NAME: ghcr.io/${{ github.repository }}${{ matrix.component == 'browser' && '-browser' || '' }}
     permissions:
       contents: read
       packages: write
@@ -79,20 +92,20 @@ jobs:
             type=sha
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.description=V2Echo 自托管通知助手
+            org.opencontainers.image.description=V2Echo ${{ matrix.component }}
 
       - name: Build and push
         id: build
         uses: docker/build-push-action@v7
         with:
-          context: .
-          file: ./Dockerfile
+          context: ${{ matrix.component == 'browser' && './browser' || '.' }}
+          file: ${{ matrix.component == 'browser' && './browser/Dockerfile' || './Dockerfile' }}
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.component }}
 
       - name: Show pull commands
         env:

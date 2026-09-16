@@ -20,16 +20,17 @@ type WebUnreadSnapshot struct {
 }
 
 type webRequestError struct {
-	message string
-	status  int
-	retry   time.Duration
-	auth    bool
+	challenge bool
+	message   string
+	status    int
+	retry     time.Duration
+	auth      bool
 }
 
 func (e *webRequestError) Error() string { return e.message }
 
-// The stored Cookie is sent only to the homepage, with no cookie jar, redirects
-// or notification-list reads.
+// Ordinary HTTP mode sends the stored Cookie only to the homepage, without
+// redirects. Optional browser mode also loads homepage/verification resources.
 func (e *Engine) readWebUnread(ctx context.Context, cookie, username string) (WebUnreadSnapshot, error) {
 	cookie = strings.TrimSpace(cookie)
 	if strings.HasPrefix(strings.ToLower(cookie), "cookie:") {
@@ -52,6 +53,16 @@ func (e *Engine) readWebUnread(ctx context.Context, cookie, username string) (We
 	if !valid {
 		return WebUnreadSnapshot{}, errors.New("Cookie 缺少有效的 A2 登录凭据，请重新复制")
 	}
+	var browser browserState
+	if e.Store != nil {
+		browser, err = e.Store.browserState()
+	}
+	if err != nil {
+		return WebUnreadSnapshot{}, err
+	}
+	if browser.Enabled {
+		return e.browserHomepage(ctx, cookie, username, "read", "")
+	}
 	req.Header.Set("Accept", "text/html")
 	req.Header.Set("User-Agent", "Mozilla/5.0 V2Echo-Notifier/0.1")
 	resp, err := e.Web.Do(req)
@@ -62,8 +73,23 @@ func (e *Engine) readWebUnread(ctx context.Context, cookie, username string) (We
 	if resp.StatusCode == 401 || ((resp.StatusCode == 301 || resp.StatusCode == 302 || resp.StatusCode == 303) && loginRedirect(resp.Header.Get("Location"))) {
 		return WebUnreadSnapshot{}, &webRequestError{message: "Cookie 登录已失效，请更新同账号的 Cookie", status: resp.StatusCode, auth: true}
 	}
-	if resp.StatusCode != 200 || strings.EqualFold(resp.Header.Get("cf-mitigated"), "challenge") {
+	if resp.StatusCode == 403 || strings.EqualFold(resp.Header.Get("cf-mitigated"), "challenge") {
+		browser.Required = true
+		if e.Store != nil {
+			if err := e.Store.saveBrowser(browser); err != nil {
+				return WebUnreadSnapshot{}, err
+			}
+		}
+		return WebUnreadSnapshot{}, &webRequestError{message: browserRequiredMessage, challenge: true, status: resp.StatusCode, retry: retryAfter(resp.Header, time.Now())}
+	}
+	if resp.StatusCode != 200 {
 		return WebUnreadSnapshot{}, &webRequestError{message: "V2EX 首页未通过登录或访问验证，请更新 Cookie 或检查服务器出口后重试", status: resp.StatusCode, retry: retryAfter(resp.Header, time.Now()), auth: resp.StatusCode == 401}
+	}
+	if browser.Required {
+		browser.Required = false
+		if err := e.Store.saveBrowser(browser); err != nil {
+			return WebUnreadSnapshot{}, err
+		}
 	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, (4<<20)+1))
 	if err != nil || len(raw) > 4<<20 {
@@ -71,8 +97,7 @@ func (e *Engine) readWebUnread(ctx context.Context, cookie, username string) (We
 	}
 	count, err := parseWebUnread(string(raw), username)
 	if err != nil {
-		var problem *webRequestError
-		if !errors.As(err, &problem) {
+		if _, ok := errors.AsType[*webRequestError](err); !ok {
 			err = &webRequestError{message: err.Error()}
 		}
 	}

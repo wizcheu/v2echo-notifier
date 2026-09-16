@@ -37,6 +37,12 @@ func main() {
 		os.Exit(1)
 	}
 	defer accounts.Close()
+	browser, err := assistant.NewBrowserService(os.Getenv("ECHO_BROWSER_CONTROL_URL"), os.Getenv("ECHO_BROWSER_DESKTOP_URL"), os.Getenv("ECHO_BROWSER_TOKEN"))
+	if err != nil {
+		slog.Error("initialize browser service", "error", err)
+		os.Exit(1)
+	}
+	accounts.SetBrowserService(browser)
 	ui, err := assistant.NewServer(accounts, web.Assets(), *dir)
 	if err != nil {
 		slog.Error("initialize management authentication", "error", err)
