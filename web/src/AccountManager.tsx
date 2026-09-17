@@ -1,10 +1,12 @@
 import { useState } from 'react'
+import AccountAvatar from './AccountAvatar'
 import RemoveAccountDialog from './RemoveAccountDialog'
 
 export type Account = {
   browser_required?: boolean
   id: string
   username: string
+  avatar_url?: string
   member_id: number
   enabled: boolean
   verified: boolean
@@ -101,7 +103,7 @@ export default function AccountManager({
               {group.items.map((account) => (
                 <section className={`account-row ${needsAttention(account) ? 'needs-attention' : ''}`} key={account.id}>
                   <div className="section-heading">
-                    <h2>{account.username ? `@${account.username}` : `待验证账号 · ${account.id.slice(0, 6)}`}</h2>
+                    <h2 className="account-identity"><AccountAvatar username={account.username} url={account.avatar_url} /><span>{account.username ? `@${account.username}` : `待验证账号 · ${account.id.slice(0, 6)}`}</span></h2>
                     <span
                       className={`status-pill ${needsAttention(account) ? 'warning' : !account.enabled ? 'neutral' : 'accepted'}`}
                     >

@@ -18,6 +18,7 @@ type Config struct {
 }
 
 type State struct {
+	AvatarURL          string    `json:"avatar_url"`
 	CheckRequested     bool      `json:"check_requested,omitempty"`
 	TokenIssue         string    `json:"token_issue"`
 	CookieIssue        string    `json:"cookie_issue"`

@@ -130,6 +130,7 @@ func (e *Engine) finishPairing(cfg Config, st State, relayURL, token string, unr
 	st.CheckRequested = false
 
 	if unread != nil {
+		st.updateAvatar(*unread)
 		st.CookieIssue = ""
 		st.CookieCheckedAt = unread.ObservedAt
 		st.HasWebUnread = true

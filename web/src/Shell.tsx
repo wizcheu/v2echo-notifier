@@ -65,7 +65,7 @@ export default function Shell({
               </a>
             ))}
           <a
-            className={`nav-item accounts-nav ${selected === 'accounts' ? 'selected' : ''}`}
+            className={`nav-item ${selected === 'accounts' ? 'selected' : ''}`}
             href="#/accounts"
             aria-current={selected === 'accounts' ? 'page' : undefined}
           >

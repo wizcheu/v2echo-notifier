@@ -277,14 +277,14 @@ func (e *Engine) browserHomepage(ctx context.Context, cookie, username, operatio
 	if out.Status != 200 || out.URL != "https://www.v2ex.com/" {
 		return WebUnreadSnapshot{}, &webRequestError{message: "浏览器未取得 V2EX 首页，请确认验证完成后重试"}
 	}
-	count, err := parseWebUnread(out.HTML, username)
+	snapshot, err := parseWebUnread(out.HTML, username)
 	if err != nil {
 		return WebUnreadSnapshot{}, err
 	}
 	if operation == "check" {
 		b.releaseLocked()
 	}
-	return WebUnreadSnapshot{Count: count, ObservedAt: time.Now().UTC()}, nil
+	return snapshot, nil
 }
 
 func (e *Engine) browserAction(ctx context.Context, operation, viewer string) (WebUnreadSnapshot, error) {
@@ -332,6 +332,7 @@ func (e *Engine) browserAction(ctx context.Context, operation, viewer string) (W
 	st.HasWebUnread = true
 	st.WebUnreadCount = result.Count
 	st.WebObservedAt = result.ObservedAt
+	st.updateAvatar(result)
 	st.NextWeb = time.Time{}
 	st.LastError = ""
 	return result, e.Store.SaveState(st)

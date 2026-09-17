@@ -16,6 +16,7 @@ import (
 
 type WebUnreadSnapshot struct {
 	Count      int
+	AvatarURL  string
 	ObservedAt time.Time
 }
 
@@ -95,27 +96,29 @@ func (e *Engine) readWebUnread(ctx context.Context, cookie, username string) (We
 	if err != nil || len(raw) > 4<<20 {
 		return WebUnreadSnapshot{}, errors.New("V2EX 首页读取不完整，请重试")
 	}
-	count, err := parseWebUnread(string(raw), username)
+	snapshot, err := parseWebUnread(string(raw), username)
 	if err != nil {
 		if _, ok := errors.AsType[*webRequestError](err); !ok {
 			err = &webRequestError{message: err.Error()}
 		}
 	}
-	return WebUnreadSnapshot{Count: count, ObservedAt: time.Now().UTC()}, err
+	return snapshot, err
 }
 
 var leadingCount = regexp.MustCompile(`^\s*(\d+)`)
 var webUsername = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
-func parseWebUnread(source, expected string) (int, error) {
+func parseWebUnread(source, expected string) (WebUnreadSnapshot, error) {
 	doc, err := html.Parse(strings.NewReader(source))
 	if err != nil {
-		return 0, errors.New("无法解析 V2EX 首页")
+		return WebUnreadSnapshot{}, errors.New("无法解析 V2EX 首页")
 	}
 	actual, count, invalid := "", -1, false
 	signIn := false
-	var visit func(*html.Node)
-	visit = func(n *html.Node) {
+	avatar := ""
+	var visit func(*html.Node, bool)
+	visit = func(n *html.Node, inSidebar bool) {
+		inSidebar = inSidebar || nodeAttribute(n, "id") == "Rightbar"
 		if n.Type == html.ElementNode && n.Data == "a" {
 			href, class := "", ""
 			for _, attr := range n.Attr {
@@ -130,9 +133,19 @@ func parseWebUnread(source, expected string) (int, error) {
 			if err == nil && u.User == nil && (u.Host == "" || strings.EqualFold(u.Host, "www.v2ex.com") || strings.EqualFold(u.Host, "v2ex.com")) &&
 				(u.Scheme == "" || u.Scheme == "https" || u.Scheme == "http") {
 				top := false
-				for _, token := range strings.Fields(class) {
+				for token := range strings.FieldsSeq(class) {
 					if token == "top" {
 						top = true
+					}
+				}
+				if inSidebar && u.Path == "/member/"+expected && avatar == "" {
+					for child := n.FirstChild; child != nil; child = child.NextSibling {
+						if child.Type == html.ElementNode && child.Data == "img" && hasHTMLClass(child, "avatar") {
+							avatar = normalizeAvatarURL(nodeAttribute(child, "src"))
+							if avatar != "" {
+								break
+							}
+						}
 					}
 				}
 				if top && u.Path == "/signin" {
@@ -171,26 +184,74 @@ func parseWebUnread(source, expected string) (int, error) {
 			}
 		}
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			visit(c)
+			visit(c, inSidebar)
 		}
 	}
-	visit(doc)
+	visit(doc, false)
 	if actual == "" && signIn {
-		return 0, &webRequestError{message: "Cookie 登录已失效，请更新同账号的 Cookie", auth: true}
+		return WebUnreadSnapshot{}, &webRequestError{message: "Cookie 登录已失效，请更新同账号的 Cookie", auth: true}
 	}
 	if actual == "" || invalid {
-		return 0, errors.New("暂时无法确认网页登录状态，请检查网络或页面访问验证后重试")
+		return WebUnreadSnapshot{}, errors.New("暂时无法确认网页登录状态，请检查网络或页面访问验证后重试")
 	}
 	if actual != expected {
-		return 0, &webRequestError{message: "API Token 与 Cookie 的用户名不完全一致（区分大小写），请使用同一 V2EX 账号的凭据", auth: true}
+		return WebUnreadSnapshot{}, &webRequestError{message: "API Token 与 Cookie 的用户名不完全一致（区分大小写），请使用同一 V2EX 账号的凭据", auth: true}
 	}
 	if count < 0 {
-		return 0, errors.New("无法读取未读数量，未将缺失计数当作零；请检查 Cookie 或页面访问状态")
+		return WebUnreadSnapshot{}, errors.New("无法读取未读数量，未将缺失计数当作零；请检查 Cookie 或页面访问状态")
 	}
-	return count, nil
+	return WebUnreadSnapshot{Count: count, AvatarURL: avatar, ObservedAt: time.Now().UTC()}, nil
 }
 
 func loginRedirect(location string) bool {
 	u, err := url.Parse(location)
 	return err == nil && u.User == nil && (u.Host == "" || strings.EqualFold(u.Host, "www.v2ex.com") || strings.EqualFold(u.Host, "v2ex.com")) && u.Path == "/signin"
+}
+
+func nodeAttribute(n *html.Node, key string) string {
+	for _, attr := range n.Attr {
+		if attr.Key == key {
+			return attr.Val
+		}
+	}
+	return ""
+}
+
+func hasHTMLClass(n *html.Node, class string) bool {
+	for token := range strings.FieldsSeq(nodeAttribute(n, "class")) {
+		if token == class {
+			return true
+		}
+	}
+	return false
+}
+
+// Saved-page local files cannot be reconstructed into a remote avatar URL.
+func normalizeAvatarURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if strings.HasPrefix(raw, "//") {
+		raw = "https:" + raw
+	}
+	if strings.HasPrefix(raw, "/") {
+		raw = "https://www.v2ex.com" + raw
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.User != nil || u.Port() != "" || (u.Scheme != "https" && u.Scheme != "http") {
+		return ""
+	}
+	host := strings.ToLower(u.Hostname())
+	if host != "v2ex.com" && host != "www.v2ex.com" && host != "cdn.v2ex.com" && !strings.HasSuffix(host, ".cdn.v2ex.com") {
+		return ""
+	}
+	if !strings.HasPrefix(u.Path, "/avatar/") && !strings.HasPrefix(u.Path, "/gravatar/") {
+		return ""
+	}
+	u.Scheme, u.Host, u.Fragment = "https", host, ""
+	return u.String()
+}
+
+func (st *State) updateAvatar(snapshot WebUnreadSnapshot) {
+	if snapshot.AvatarURL != "" {
+		st.AvatarURL = snapshot.AvatarURL
+	}
 }

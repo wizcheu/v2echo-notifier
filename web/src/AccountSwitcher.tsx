@@ -4,6 +4,7 @@ import type { Account } from './AccountManager'
 import { accountHref } from './routes'
 import type { Page } from './routes'
 import Icon from './Icon'
+import AccountAvatar from './AccountAvatar'
 
 function accountStatus(account: Account) {
   if (account.blocked || account.token_issue || account.cookie_issue || !account.cookie_configured)
@@ -93,9 +94,7 @@ export default function AccountSwitcher({
           }
         }}
       >
-        <span className="avatar" aria-hidden="true">
-          {current.username?.slice(0, 1).toUpperCase() || 'V'}
-        </span>
+        <AccountAvatar username={current.username} url={current.avatar_url} />
         <span className="account-trigger-copy">
           <strong>{current.username ? `@${current.username}` : '待验证账号'}</strong>
           <small>当前账号</small>
@@ -127,9 +126,7 @@ export default function AccountSwitcher({
                 href={accountHref(account.id, page)}
                 onClick={() => close(account.id === accountID)}
               >
-                <span className="avatar" aria-hidden="true">
-                  {account.username?.slice(0, 1).toUpperCase() || 'V'}
-                </span>
+                <AccountAvatar username={account.username} url={account.avatar_url} />
                 <span className="account-option-copy">
                   <strong>{account.username ? `@${account.username}` : '待验证账号'}</strong>
                   <small>{accountStatus(account)}</small>

@@ -59,6 +59,7 @@ func (e *Engine) stepHybridLocked(ctx context.Context, cfg Config, st State, now
 	st.HasWebUnread = true
 	st.WebUnreadCount = web.Count
 	st.WebObservedAt = web.ObservedAt
+	st.updateAvatar(web)
 	st.Phase = "live"
 	st.Page = 1
 	if st.AuthBlocked {

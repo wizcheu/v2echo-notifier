@@ -16,9 +16,89 @@ import (
 func webPage(username string, count int) string {
 	return fmt.Sprintf(`<html><a class="top" href="/">首页</a><a class="top" href="/member/%s">本人</a><a href="/notifications" class="fade">%d 未读提醒</a><a href="/member/other">帖子作者</a></html>`, username, count)
 }
+
+const testAvatarURL = "https://cdn.v2ex.com/avatar/0000/0000/7_large.png?m=1"
+
+func avatarCard(username, src string) string {
+	return fmt.Sprintf(`<div id="Rightbar"><div class="box"><a href="/member/%s"><img class="avatar" src="%s"></a></div></div>`, username, src)
+}
+
+func TestHomepageAvatarBelongsToAuthenticatedAccount(t *testing.T) {
+	for _, tc := range []struct{ name, card, want string }{
+		{"https", avatarCard("tester", testAvatarURL), testAvatarURL},
+		{"protocol relative", avatarCard("tester", "//cdn.v2ex.com/avatar/7.png?m=2&amp;x=1"), "https://cdn.v2ex.com/avatar/7.png?m=2&x=1"},
+		{"root relative", avatarCard("tester", "/avatar/7.png"), "https://www.v2ex.com/avatar/7.png"},
+		{"http", avatarCard("tester", "http://cdn.v2ex.com/avatar/7.png"), "https://cdn.v2ex.com/avatar/7.png"},
+		{"absolute member", strings.ReplaceAll(avatarCard("tester", testAvatarURL), `href="/member/`, `href="https://www.v2ex.com/member/`), testAvatarURL},
+		{"other member", avatarCard("other", testAvatarURL), ""},
+		{"wrong case", avatarCard("TESTER", testAvatarURL), ""},
+		{"post author", strings.ReplaceAll(avatarCard("tester", testAvatarURL), "Rightbar", "Main"), ""},
+		{"saved local image", avatarCard("tester", "./V2EX_files/7_large.png"), ""},
+		{"untrusted image", avatarCard("tester", "https://cdn.v2ex.com.evil.example/avatar/7.png"), ""},
+		{"credentials", avatarCard("tester", "https://secret@cdn.v2ex.com/avatar/7.png"), ""},
+		{"data URL", avatarCard("tester", "data:image/svg+xml,test"), ""},
+		{"missing", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseWebUnread(webPage("tester", 3)+tc.card, "tester")
+			if err != nil || got.Count != 3 || got.AvatarURL != tc.want {
+				t.Fatalf("snapshot = %+v, error = %v", got, err)
+			}
+		})
+	}
+	if got, err := parseWebUnread(webPage("other", 3)+avatarCard("tester", testAvatarURL), "tester"); err == nil || got.AvatarURL != "" {
+		t.Fatalf("wrong identity yielded avatar: %+v, %v", got, err)
+	}
+}
+
+func TestAccountAvatarPersistsAndRefreshesWithHomepage(t *testing.T) {
+	a, _ := testAccounts(t)
+	mockAccountVerification(t, a, 7, "tester")
+	transport := a.verificationTransport
+	a.verificationTransport = func(proxy ProxyConfig) http.RoundTripper {
+		base := transport(proxy)
+		return transportFunc(func(r *http.Request) (*http.Response, error) {
+			if r.URL.Path == "/" {
+				return response(200, webPage("tester", 0)+avatarCard("tester", testAvatarURL)), nil
+			}
+			return base.RoundTrip(r)
+		})
+	}
+	id, err := a.Add(t.Context(), "synthetic-token", "A2=synthetic-cookie", ProxyConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, _ := a.Get(id)
+	check := func(want string) {
+		t.Helper()
+		list, err := a.List()
+		if err != nil || len(list) != 1 || list[0].AvatarURL != want || stateOf(t, e.Store).AvatarURL != want {
+			t.Fatalf("avatar not persisted/exposed: %+v, %v", list, err)
+		}
+	}
+	check(testAvatarURL)
+	updated := "https://cdn.v2ex.com/avatar/0000/0000/7_large.png?m=2"
+	for i, card := range []string{avatarCard("tester", updated), ""} {
+		e.Web.Transport = transportFunc(func(r *http.Request) (*http.Response, error) {
+			if r.URL.String() != "https://www.v2ex.com/" {
+				t.Fatal("unexpected extra request", r.URL)
+			}
+			return response(200, webPage("tester", 0)+card), nil
+		})
+		cfg, err := e.Store.Config()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := e.stepHybridLocked(t.Context(), cfg, stateOf(t, e.Store), time.Now().Add(time.Duration(i+1)*4*time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+		check(updated)
+	}
+}
+
 func TestWebUnreadOnlyAcceptsAuthenticatedSameAccountAndCount(t *testing.T) {
 	for _, source := range []string{webPage("tester", 3), strings.ReplaceAll(webPage("tester", 3), `href="/`, `href="https://www.v2ex.com/`), strings.ReplaceAll(webPage("tester", 3), "未读提醒", "unread")} {
-		if count, err := parseWebUnread(source, "tester"); err != nil || count != 3 {
+		if count, err := parseWebUnread(source, "tester"); err != nil || count.Count != 3 {
 			t.Fatal(count, err)
 		}
 	}
@@ -33,7 +113,7 @@ func TestWebUnreadOnlyAcceptsAuthenticatedSameAccountAndCount(t *testing.T) {
 			t.Fatal("invalid page accepted")
 		}
 	}
-	if count, err := parseWebUnread(webPage("tester", 0), "tester"); err != nil || count != 0 {
+	if count, err := parseWebUnread(webPage("tester", 0), "tester"); err != nil || count.Count != 0 {
 		t.Fatal("zero should be valid")
 	}
 }

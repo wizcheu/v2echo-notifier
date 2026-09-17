@@ -34,6 +34,7 @@ type Accounts struct {
 }
 
 type AccountSummary struct {
+	AvatarURL        string `json:"avatar_url"`
 	BrowserRequired  bool   `json:"browser_required"`
 	ID               string `json:"id"`
 	Username         string `json:"username"`
@@ -213,7 +214,7 @@ func (a *Accounts) Add(ctx context.Context, token, cookie string, proxy ProxyCon
 	if err := ctx.Err(); err != nil {
 		return "", errors.New("账号验证已取消或超时，请重试")
 	}
-	st := State{AccountID: member.ID, Username: member.Username, Verified: true, Phase: "history", Page: 1,
+	st := State{AccountID: member.ID, Username: member.Username, AvatarURL: snapshot.AvatarURL, Verified: true, Phase: "history", Page: 1,
 		CookieCheckedAt: snapshot.ObservedAt, HasWebUnread: true, WebUnreadCount: snapshot.Count, WebObservedAt: snapshot.ObservedAt}
 	if pendingBrowser {
 		st.HasWebUnread = false
@@ -289,7 +290,7 @@ func (a *Accounts) List() ([]AccountSummary, error) {
 		if err != nil {
 			return nil, err
 		}
-		result = append(result, AccountSummary{BrowserRequired: e.browserStatus().Required, ID: id, Username: st.Username, MemberID: st.AccountID, Enabled: cfg.Enabled, Verified: st.Verified, Blocked: st.AuthBlocked || st.CookieIssue != "", CookieConfigured: cfg.Cookie != "", CookieVerified: !st.CookieCheckedAt.IsZero() && st.CookieIssue == "", TokenIssue: st.TokenIssue, CookieIssue: st.CookieIssue, LastError: st.LastError})
+		result = append(result, AccountSummary{BrowserRequired: e.browserStatus().Required, ID: id, Username: st.Username, AvatarURL: st.AvatarURL, MemberID: st.AccountID, Enabled: cfg.Enabled, Verified: st.Verified, Blocked: st.AuthBlocked || st.CookieIssue != "", CookieConfigured: cfg.Cookie != "", CookieVerified: !st.CookieCheckedAt.IsZero() && st.CookieIssue == "", TokenIssue: st.TokenIssue, CookieIssue: st.CookieIssue, LastError: st.LastError})
 	}
 	sort.Slice(result, func(i, j int) bool {
 		if result[i].Username == result[j].Username {

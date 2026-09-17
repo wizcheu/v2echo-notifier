@@ -90,7 +90,7 @@ func TestBrowserRecoveryKeepsSessionAndPushBaseline(t *testing.T) {
 		if calls > 1 && !strings.Contains(string(in.Cookies), "private-clearance") {
 			t.Error("clearance not retained")
 		}
-		out := browserResponse{URL: "https://www.v2ex.com/", Status: 200, HTML: webPage("tester", 4), Cookies: json.RawMessage(`[{"name":"cf_clearance","value":"private-clearance","domain":"www.v2ex.com"}]`)}
+		out := browserResponse{URL: "https://www.v2ex.com/", Status: 200, HTML: webPage("tester", 4) + avatarCard("tester", testAvatarURL), Cookies: json.RawMessage(`[{"name":"cf_clearance","value":"private-clearance","domain":"www.v2ex.com"}]`)}
 		if path == "/start" {
 			out.Status = 403
 			out.Challenged = true
@@ -121,6 +121,9 @@ func TestBrowserRecoveryKeepsSessionAndPushBaseline(t *testing.T) {
 		t.Fatal("desktop stream not revoked")
 	}
 	after := stateOf(t, e.Store)
+	if got.AvatarURL != testAvatarURL || after.AvatarURL != testAvatarURL {
+		t.Fatal("browser recovery did not persist avatar", got, after.AvatarURL)
+	}
 	if after.LastPushAPIID != before.LastPushAPIID || after.NextAPI != before.NextAPI || after.CookieIssue != "" {
 		t.Fatal("recovery changed baseline/cooldown or failed to recover cookie")
 	}
