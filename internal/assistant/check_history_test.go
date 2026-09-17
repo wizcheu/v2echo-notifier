@@ -180,3 +180,28 @@ func TestCheckHistoryLegacyDoesNotInventUnreadCount(t *testing.T) {
 		t.Fatal(c)
 	}
 }
+
+func TestCheckHistoryMissingBrowserReportsActionableCause(t *testing.T) {
+	e, _, _, apiCalls := hybridFixture(t)
+	st := stateOf(t, e.Store)
+	st.HasPushAPIID, st.LastPushAPIID = true, 30
+	st.NextTokenCheck = time.Now().Add(time.Hour)
+	if err := e.Store.SaveState(st); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Store.saveBrowser(browserState{Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	e.Web.Transport = transportFunc(func(*http.Request) (*http.Response, error) {
+		t.Fatal("missing browser must not silently fall back to normal HTTP")
+		return nil, nil
+	})
+	hybridStep(t, e)
+	check, after := latestCheck(t, e.Store), stateOf(t, e.Store)
+	if check.Web.Detail != after.LastError || !strings.Contains(check.Web.Detail, "尚未部署浏览器配套容器") {
+		t.Fatalf("specific browser cause was lost: %s", check.Web.Detail)
+	}
+	if check.Web.HTTPStatus != 0 || check.API.Status != "skipped" || *apiCalls != 0 || after.LastPushAPIID != 30 {
+		t.Fatal("missing browser changed the baseline or claimed an upstream request", check)
+	}
+}

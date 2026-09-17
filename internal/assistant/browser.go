@@ -59,6 +59,25 @@ func (s *Store) saveBrowser(b browserState) error {
 	return err
 }
 
+func (s *Store) disableBrowser(st State) error {
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err = tx.Exec("DELETE FROM browser_session WHERE id=1"); err != nil {
+		return err
+	}
+	// Also recognize the older wording persisted before the warning was updated.
+	if strings.Contains(st.LastError, "尚未部署浏览器配套容器") {
+		st.LastError = ""
+		if err = saveState(tx, st); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 // One visible desktop is shared by the instance. A manual lease prevents any
 // other account or scheduled check from navigating it while the user verifies.
 type BrowserService struct {
@@ -117,18 +136,18 @@ func (b *BrowserService) call(ctx context.Context, operation string, in browserR
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, b.control+"/"+operation, bytes.NewReader(raw))
 	if err != nil {
-		return out, errors.New("浏览器服务配置不正确")
+		return out, &webRequestError{message: "浏览器服务配置不正确"}
 	}
 	req.Header.Set("Authorization", "Bearer "+b.token)
 	req.Header.Set("Content-Type", "application/json")
 	res, err := b.client.Do(req)
 	if err != nil {
-		return out, errors.New("无法连接浏览器服务，请检查配套容器后重试")
+		return out, &webRequestError{message: "无法连接浏览器服务，请检查配套容器后重试"}
 	}
 	defer res.Body.Close()
 	if res.StatusCode != 200 {
 		if res.StatusCode == http.StatusUnauthorized {
-			return out, errors.New("浏览器服务认证失败，请检查两个容器的共享密钥是否一致")
+			return out, &webRequestError{message: "浏览器服务认证失败，请检查两个容器的共享密钥是否一致"}
 		}
 		var diagnostic struct {
 			Stage string `json:"stage"`
@@ -149,14 +168,14 @@ func (b *BrowserService) call(ctx context.Context, operation string, in browserR
 				"dns_failed": "域名解析失败", "tls_failed": "站点证书验证失败", "homepage_timeout": "等待首页加载超时",
 			}
 			if stage, code := stages[diagnostic.Stage], codes[diagnostic.Code]; stage != "" && code != "" {
-				return out, errors.New(stage + "失败：" + code + "。可重试；若持续失败，请检查浏览器容器日志")
+				return out, &webRequestError{message: stage + "失败：" + code + "。可重试；若持续失败，请检查浏览器容器日志"}
 			}
 		}
-		return out, errors.New("浏览器操作失败，请检查配套容器后重试")
+		return out, &webRequestError{message: "浏览器操作失败，请检查配套容器后重试"}
 	}
 	data, err := io.ReadAll(io.LimitReader(res.Body, 6<<20+1))
 	if err != nil || len(data) > 6<<20 || json.Unmarshal(data, &out) != nil {
-		return out, errors.New("浏览器服务响应无效")
+		return out, &webRequestError{message: "浏览器服务响应无效"}
 	}
 	return out, nil
 }
@@ -203,7 +222,7 @@ func (e *Engine) browserInput(cookie string) (browserRequest, browserState, erro
 
 func (e *Engine) browserHomepage(ctx context.Context, cookie, username, operation, viewer string) (WebUnreadSnapshot, error) {
 	if e.Browser == nil {
-		return WebUnreadSnapshot{}, errors.New("尚未部署浏览器配套容器，请按部署文档启用浏览器验证")
+		return WebUnreadSnapshot{}, &webRequestError{message: "当前尚未部署浏览器配套容器，如遇代理访问返回403、需要CF人机验证无法使用的情况，请按部署文档启用浏览器验证"}
 	}
 	b := e.Browser
 	b.mu.Lock()
@@ -212,13 +231,13 @@ func (e *Engine) browserHomepage(ctx context.Context, cookie, username, operatio
 		b.releaseLocked()
 	}
 	if b.owner != "" && (b.owner != e.profileID || (operation == "start" && b.viewer != viewer)) {
-		return WebUnreadSnapshot{}, errors.New("其他账号或管理窗口正在验证，请完成或关闭验证后重试")
+		return WebUnreadSnapshot{}, &webRequestError{message: "其他账号或管理窗口正在验证，请完成或关闭验证后重试"}
 	}
 	if operation == "read" && b.owner != "" {
-		return WebUnreadSnapshot{}, errors.New("正在等待人工验证，请完成后点击重试首页")
+		return WebUnreadSnapshot{}, &webRequestError{message: "正在等待人工验证，请完成后点击重试首页"}
 	}
 	if operation == "check" && (b.owner != e.profileID || b.viewer != viewer) {
-		return WebUnreadSnapshot{}, errors.New("验证窗口已到期，请重新打开")
+		return WebUnreadSnapshot{}, &webRequestError{message: "验证窗口已到期，请重新打开"}
 	}
 	in, st, err := e.browserInput(cookie)
 	if err != nil {
@@ -256,7 +275,7 @@ func (e *Engine) browserHomepage(ctx context.Context, cookie, username, operatio
 		return WebUnreadSnapshot{}, &webRequestError{message: browserRequiredMessage, status: out.Status}
 	}
 	if out.Status != 200 || out.URL != "https://www.v2ex.com/" {
-		return WebUnreadSnapshot{}, errors.New("浏览器未取得 V2EX 首页，请确认验证完成后重试")
+		return WebUnreadSnapshot{}, &webRequestError{message: "浏览器未取得 V2EX 首页，请确认验证完成后重试"}
 	}
 	count, err := parseWebUnread(out.HTML, username)
 	if err != nil {
@@ -274,15 +293,8 @@ func (e *Engine) browserAction(ctx context.Context, operation, viewer string) (W
 	if e.removed {
 		return WebUnreadSnapshot{}, ErrAccountRemoved
 	}
-	cfg, err := e.Store.Config()
-	if err != nil {
-		return WebUnreadSnapshot{}, err
-	}
 	st, err := e.Store.State()
 	if err != nil {
-		return WebUnreadSnapshot{}, err
-	}
-	if _, err = normalizeWebCookie(cfg.Cookie); err != nil {
 		return WebUnreadSnapshot{}, err
 	}
 	if operation == "disable" {
@@ -300,7 +312,14 @@ func (e *Engine) browserAction(ctx context.Context, operation, viewer string) (W
 				b.releaseLocked()
 			}
 		}
-		return WebUnreadSnapshot{}, e.Store.saveBrowser(browserState{})
+		return WebUnreadSnapshot{}, e.Store.disableBrowser(st)
+	}
+	cfg, err := e.Store.Config()
+	if err != nil {
+		return WebUnreadSnapshot{}, err
+	}
+	if _, err = normalizeWebCookie(cfg.Cookie); err != nil {
+		return WebUnreadSnapshot{}, err
 	}
 	result, err := e.browserHomepage(ctx, cfg.Cookie, st.Username, operation, viewer)
 	if err != nil || operation != "check" {

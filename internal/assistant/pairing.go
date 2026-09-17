@@ -116,6 +116,14 @@ func (e *Engine) Pair(ctx context.Context, relayURL, code, cookie string) error 
 	if err = json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&result); err != nil || !result.Paired || result.BindingID == "" || !strings.EqualFold(result.Username, st.Username) {
 		return errors.New("配对回执不匹配，请使用同一码重试")
 	}
+	if err = e.finishPairing(cfg, st, relayURL, token, unread); err != nil {
+		return err
+	}
+	_, err = e.Store.DB.Exec("DELETE FROM pairing_invitation")
+	return err
+}
+
+func (e *Engine) finishPairing(cfg Config, st State, relayURL, token string, unread *WebUnreadSnapshot) error {
 	changed := cfg.RelayURL != relayURL || cfg.RelayToken != token
 	retire := changed && cfg.RelayToken != ""
 	cfg.RelayURL, cfg.RelayToken = relayURL, token

@@ -122,6 +122,7 @@ func OpenStore(dir string) (*Store, error) {
         WHERE event_id=NEW.event_id;
       END;
       CREATE TABLE IF NOT EXISTS pending_pairing (id INTEGER PRIMARY KEY CHECK(id=1), fingerprint TEXT NOT NULL, token TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS pairing_invitation (id INTEGER PRIMARY KEY CHECK(id=1), body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS relay_schedule (id INTEGER PRIMARY KEY CHECK(id=1), next_sync INTEGER NOT NULL, failures INTEGER NOT NULL, blocked INTEGER NOT NULL DEFAULT 0);
       INSERT OR IGNORE INTO relay_schedule(id,next_sync,failures) VALUES(1,0,0);
       PRAGMA user_version=4;`)
@@ -382,7 +383,7 @@ func (s *Store) EraseAccount() error {
 		return err
 	}
 	defer tx.Rollback()
-	for _, table := range []string{"browser_session", "settings", "sync_state", "notifications", "outbox", "delivery_history", "check_history", "push_test_schedule", "pending_pairing", "relay_schedule"} {
+	for _, table := range []string{"browser_session", "settings", "sync_state", "notifications", "outbox", "delivery_history", "check_history", "push_test_schedule", "pending_pairing", "pairing_invitation", "relay_schedule"} {
 		if _, err = tx.Exec("DELETE FROM " + table); err != nil {
 			return err
 		}

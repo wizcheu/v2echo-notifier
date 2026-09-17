@@ -303,6 +303,65 @@ func TestBrowserFailureNeverFallsBackToDirect(t *testing.T) {
 	}
 }
 
+func TestDisableMissingBrowserPreservesAccountAndScheduling(t *testing.T) {
+	for _, cookie := range []string{"A2=fake-cookie", "malformed-cookie"} {
+		t.Run(cookie, func(t *testing.T) {
+			e, _, _, apiCalls := hybridFixture(t)
+			cfg, _ := e.Store.Config()
+			cfg.Cookie, cfg.ProxyMode, cfg.ProxyURL = cookie, "custom", "http://user:private-proxy@proxy.example:8080"
+			st := stateOf(t, e.Store)
+			st.HasPushAPIID, st.LastPushAPIID = true, 30
+			st.NextAPI, st.NextWeb, st.NextCheck = time.Now().Add(time.Hour), time.Now().Add(time.Minute), time.Now().Add(time.Minute)
+			st.CookieIssue = "existing cookie issue"
+			st.LastError = "尚未部署浏览器配套容器，请按部署文档启用浏览器验证"
+			if err := e.Store.SaveConfig(cfg, st, false); err != nil {
+				t.Fatal(err)
+			}
+			if err := e.Store.saveBrowser(browserState{Enabled: true, Required: true, Cookies: json.RawMessage(`[{"value":"private-clearance"}]`)}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := e.browserAction(t.Context(), "disable", "viewer"); err != nil {
+				t.Fatal(err)
+			}
+			browser, _ := e.Store.browserState()
+			after := stateOf(t, e.Store)
+			if browser.Enabled || browser.Required || len(browser.Cookies) != 0 || after.LastError != "" {
+				t.Fatal("stale browser state remains")
+			}
+			if after.LastPushAPIID != 30 || !after.NextAPI.Equal(st.NextAPI) || !after.NextWeb.Equal(st.NextWeb) || !after.NextCheck.Equal(st.NextCheck) || after.CookieIssue != st.CookieIssue || *apiCalls != 0 {
+				t.Fatal("disabling changed credentials, baseline or cooldown")
+			}
+			saved, _ := e.Store.Config()
+			if saved.Cookie != cfg.Cookie || saved.ProxyURL != cfg.ProxyURL || saved.RelayToken != cfg.RelayToken {
+				t.Fatal("saved configuration changed")
+			}
+			if cookie == "A2=fake-cookie" {
+				if _, err := e.readWebUnread(t.Context(), cookie, "tester"); err != nil {
+					t.Fatalf("ordinary homepage path did not recover: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestDisableMissingBrowserKeepsUnrelatedError(t *testing.T) {
+	e, _, _, _ := hybridFixture(t)
+	st := stateOf(t, e.Store)
+	st.LastError = "an unrelated failure"
+	if err := e.Store.SaveState(st); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Store.saveBrowser(browserState{Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.browserAction(t.Context(), "disable", "viewer"); err != nil {
+		t.Fatal(err)
+	}
+	if stateOf(t, e.Store).LastError != st.LastError {
+		t.Fatal("unrelated failure was hidden")
+	}
+}
+
 func TestNewAccountWithChallengeCanInstallBrowserLaterWithoutStartingSync(t *testing.T) {
 	a, _ := testAccounts(t)
 	b, err := NewBrowserService("http://browser:8090", "http://browser:3000", strings.Repeat("x", 32))

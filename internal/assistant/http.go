@@ -190,6 +190,36 @@ func (s *Server) Handler() http.Handler {
 		}
 		writeJSON(w, 200, map[string]bool{"paired": true})
 	}))
+	mux.HandleFunc("POST /api/accounts/{accountID}/pair/qr", s.account(func(e *Engine, w http.ResponseWriter, r *http.Request) {
+		var input struct {
+			Cookie string `json:"cookie"`
+		}
+		if err := decode(w, r, &input); err != nil {
+			fail(w, 400, "配对请求格式不正确")
+			return
+		}
+		result, err := e.CreatePairingInvitation(r.Context(), input.Cookie)
+		if err != nil {
+			fail(w, 400, err.Error())
+			return
+		}
+		writeJSON(w, 200, result)
+	}))
+	mux.HandleFunc("POST /api/accounts/{accountID}/pair/qr/complete", s.account(func(e *Engine, w http.ResponseWriter, r *http.Request) {
+		var input struct {
+			Code string `json:"code"`
+		}
+		if err := decode(w, r, &input); err != nil {
+			fail(w, 400, "配对请求格式不正确")
+			return
+		}
+		paired, err := e.CompletePairingInvitation(r.Context(), input.Code)
+		if err != nil {
+			fail(w, 400, err.Error())
+			return
+		}
+		writeJSON(w, 200, map[string]bool{"paired": paired})
+	}))
 	mux.HandleFunc("POST /api/accounts/{accountID}/check", s.account(func(e *Engine, w http.ResponseWriter, r *http.Request) {
 		if err := e.RequestCheck(); err != nil {
 			if errors.Is(err, ErrQuietHours) || errors.Is(err, ErrSyncDisabled) || errors.Is(err, ErrPairingRequired) {

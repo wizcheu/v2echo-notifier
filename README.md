@@ -42,7 +42,7 @@ docker compose exec notifier /notifier -data /data -print-admin-token
 打开 `http://<宿主机地址>:8282`，用命令输出的管理密钥登录，然后：
 
 1. 添加账号，填写同一个 V2EX 账号的 API Token 和网页 Cookie（需包含 A2）。
-2. 在 V2Echo App 中生成配对码，到「连接与设置 → 接收设备」完成配对。
+2. 到「连接与设置 → 接收设备」生成二维码，用 V2Echo App 的「远程推送 → 扫码绑定通知助手」扫描，再在助手点击「已扫码，完成绑定」。也可继续在 App 生成配对码，复制到助手手动配对。
 3. 在「同步偏好」确认推送时段，再到「推送测试」检查接收情况。
 
 `latest` 用于正式版本，`edge` 用于测试。固定版本、更新迁移、代理和数据卷说明见[部署与更新](docs/deployment.md)。

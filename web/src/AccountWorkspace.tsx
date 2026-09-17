@@ -16,6 +16,8 @@ import type { Page } from './routes'
 import Icon from './Icon'
 import type { PushHistoryPage } from './PushHistory'
 import PushTest, { pushServiceURL } from './PushTest'
+import PairingQR from './PairingQR'
+import PairingSuccessDialog from './PairingSuccessDialog'
 import BrowserVerification from './BrowserVerification'
 import type { BrowserStatus } from './BrowserVerification'
 import type { PushTestState } from './PushTest'
@@ -84,6 +86,8 @@ const phases: Record<string, string> = {
   live: '自动检查已开启',
 }
 const time = formatTime
+const browserSetupMessage = '当前尚未部署浏览器配套容器，如遇代理访问返回403、需要CF人机验证无法使用的情况，请按部署文档启用浏览器验证'
+const isBrowserSetupMessage = (message: string) => message.includes('尚未部署浏览器配套容器')
 
 export default function AccountWorkspace({
   accountID,
@@ -120,6 +124,7 @@ export default function AccountWorkspace({
   const [connectionError, setConnectionError] = useState('')
   const [busy, setBusy] = useState(false)
   const [confirmRemove, setConfirmRemove] = useState(false)
+  const [showsPairingSuccess, setShowsPairingSuccess] = useState(false)
   const seeded = useRef(false)
   const active = useRef(true)
   const accountPath = useCallback((path: string) => `accounts/${encodeURIComponent(accountID)}/${path}`, [accountID])
@@ -303,10 +308,25 @@ export default function AccountWorkspace({
   const recovery = tab === 'overview' && credentialIssue
   const cookieVerified = config.cookie_configured && !state.cookie_issue && Boolean(state.cookie_checked_at && !state.cookie_checked_at.startsWith('0001'))
   const detailOpen = tab === 'pushHistory' && Boolean(readHistoryLocation(hash).event)
+  const pairingSucceeded = async () => {
+    if (!active.current) return
+    setPairCode('')
+    setPairCookie('')
+    setMessage('')
+    setShowsPairingSuccess(true)
+    try {
+      await loadSavedConfig(configLoaded ? 'pairing' : 'all')
+      await refresh(true)
+    } catch {
+      if (active.current) setError('设备已成功绑定，但设置暂未刷新，请稍后刷新页面。')
+    }
+  }
   const pair = () => void action(async () => {
-    try { await api(accountPath('pair'), 'POST', { code: pairCode, cookie: pairCookie }) } finally { setPairCookie('') }
-    setPairCode(''); await loadSavedConfig(configLoaded ? 'pairing' : 'all'); await refresh(true)
-    setMessage('接收设备已配对，将按同步开关、推送时段和现有额度继续检查与上报。')
+    try {
+      const result = await api<{ paired: boolean }>(accountPath('pair'), 'POST', { code: pairCode, cookie: pairCookie })
+      if (!result.paired) throw new Error('尚未完成绑定，请重试。')
+      await pairingSucceeded()
+    } finally { setPairCookie('') }
   })
   const settingsTabs = (
     <nav className="settings-tabs" aria-label="设置分类">
@@ -349,8 +369,8 @@ export default function AccountWorkspace({
         </div>
       )}
       {error && (
-        <div className="notice error" role="alert">
-          {error}
+        <div className={`notice ${isBrowserSetupMessage(error) ? 'warning' : 'error'}`} role="alert">
+          {isBrowserSetupMessage(error) ? browserSetupMessage : error}
           <button className="text-button" onClick={() => setError('')}>
             关闭
           </button>
@@ -362,15 +382,19 @@ export default function AccountWorkspace({
         </div>
       )}
       {state.last_error && state.last_error !== state.token_issue && state.last_error !== state.cookie_issue && (
-        <div className="notice error" role="alert">
-          {state.last_error}
+        <div className={`notice ${isBrowserSetupMessage(state.last_error) ? 'warning' : 'error'}`} role="alert">
+          {isBrowserSetupMessage(state.last_error) ? browserSetupMessage : state.last_error}
         </div>
       )}
 
       {snapshot.browser && (snapshot.browser.required || snapshot.browser.enabled || (tab === 'proxy' && (
         snapshot.browser.available || proxyResult?.checks.some(check => check.name === 'V2EX' && check.http_status === 403)
       ))) && (
-        <BrowserVerification status={snapshot.browser} accountPath={accountPath} refresh={() => refresh(true)} onExpired={onExpired} />
+        <BrowserVerification status={snapshot.browser} accountPath={accountPath} refresh={() => refresh(true)} onExpired={onExpired}
+          onDisabled={() => {
+            setError(current => isBrowserSetupMessage(current) ? '' : current)
+            setMessage('已关闭浏览器兼容模式，将按已保存的代理设置和检查计划读取首页。')
+          }} />
       )}
       {state.token_issue && !recovery && (
         <section className="notice error" role="alert">
@@ -393,7 +417,8 @@ export default function AccountWorkspace({
       )}
       {onboarding && <div className="onboarding content-surface">
         <ol className="connection-steps"><li><Icon name="check_circle" /><div><strong>账号验证</strong><small>已完成</small></div></li><li><Icon name="time" /><div><strong>配对设备</strong><small>当前步骤</small></div></li><li><Icon name={config.enabled ? "check_circle" : "time"} /><div><strong>启用同步</strong><small>{config.enabled ? '已启用' : '下一步'}</small></div></li></ol>
-        <section><h2>在 App 中生成配对码</h2><p className="muted">打开接收设备的通知设置，确认使用 @{state.username} 账号，然后复制配对码。</p>
+        <section><PairingQR key={accountID} accountID={accountID} username={state.username} cookie={pairCookie} disabled={busy || (!config.cookie_configured && !pairCookie)} onExpired={onExpired} onPaired={pairingSucceeded} />
+          <h2>或填写 App 配对码</h2><p className="muted">原有手动方式仍可使用：在 App 生成配对码后，粘贴到下方。</p>
           <label>配对码<input value={pairCode} onChange={e => setPairCode(e.target.value)} disabled={busy} maxLength={28} autoComplete="off" placeholder="输入 V2E-…" /></label>
           {!config.cookie_configured && <SecretField label="同账号的 Cookie" value={pairCookie} onChange={setPairCookie} maxLength={16384} disabled={busy} />}
           <div className="onboarding-actions"><button className="primary" disabled={busy || !pairCode || (!config.cookie_configured && !pairCookie)} onClick={pair}>{busy ? '正在配对…' : '配对设备'}</button><a className="text-link" href={href('settings')}>稍后配对</a></div>
@@ -717,7 +742,9 @@ export default function AccountWorkspace({
             <div className="section-heading">
               <h2>{pairingBlocked ? '重新配对接收设备' : relayReady ? '更换接收设备' : '配对接收设备'}</h2>
             </div>
-            <p className="muted">在接收设备的通知设置中生成配对码。两端需要使用同一个 V2EX 账号。</p>
+            <PairingQR key={accountID} accountID={accountID} username={state.username} cookie={pairCookie} disabled={busy || !state.verified || state.auth_blocked || (!state.initial_pairing_done && !config.cookie_configured && !pairCookie)} onExpired={onExpired} onPaired={pairingSucceeded} />
+            <h3>或填写 App 配对码</h3>
+            <p className="muted">也可以在 App 中生成配对码，复制后填入下方。两端需要使用同一个 V2EX 账号。</p>
             <div className="pairing-fields">
               <label>
                 {relayReady ? '新配对码' : '配对码'}
@@ -980,6 +1007,9 @@ export default function AccountWorkspace({
       )}
 
       {tab === 'pushHistory' && <PushHistory loadPage={loadDeliveries} username={state.username} />}
+      {showsPairingSuccess && <PairingSuccessDialog username={state.username}
+        onClose={() => setShowsPairingSuccess(false)}
+        onTest={() => { setShowsPairingSuccess(false); setTab('pushTest') }} />}
       {tab === 'checkHistory' && <CheckHistory accountID={accountID} onExpired={onExpired} />}
 
       {tab === 'history' && (
