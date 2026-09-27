@@ -79,6 +79,27 @@ func (s *Server) Handler() http.Handler {
 		http.SetCookie(w, &http.Cookie{Name: "notifier_session", Value: "", Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: s.SecureCookies || r.TLS != nil, MaxAge: -1})
 		writeJSON(w, 200, map[string]bool{"ok": true})
 	}))
+	mux.HandleFunc("GET /api/assistant-connection", s.authorized(func(w http.ResponseWriter, r *http.Request) {
+		view, err := s.Accounts.ConnectionView()
+		if err != nil {
+			fail(w, 500, "无法读取多账号连接状态")
+			return
+		}
+		writeJSON(w, 200, view)
+	}))
+	mux.HandleFunc("POST /api/assistant-connection", s.authorized(func(w http.ResponseWriter, r *http.Request) {
+		if err := s.Accounts.EnableConnection(); err != nil {
+			fail(w, 500, "无法保存连接授权")
+			return
+		}
+		_ = s.Accounts.SyncConnection(r.Context(), time.Now())
+		view, err := s.Accounts.ConnectionView()
+		if err != nil {
+			fail(w, 500, "无法读取多账号连接状态")
+			return
+		}
+		writeJSON(w, 200, view)
+	}))
 	mux.HandleFunc("GET /api/accounts", s.authorized(func(w http.ResponseWriter, r *http.Request) {
 		accounts, err := s.Accounts.List()
 		if err != nil {

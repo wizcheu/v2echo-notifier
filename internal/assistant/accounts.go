@@ -23,6 +23,8 @@ var profileID = regexp.MustCompile(`^[0-9a-f]{32}$`)
 // Each account owns its database and encryption key. The registry contains only
 // profile membership and the budget shared by this notifier's outbound calls.
 type Accounts struct {
+	connectionClient      *http.Client
+	reuseMu               sync.Mutex
 	Browser               *BrowserService
 	mu                    sync.Mutex
 	DB                    *sql.DB
@@ -66,11 +68,12 @@ func OpenAccounts(dir string) (*Accounts, error) {
 	db.SetMaxOpenConns(1)
 	if _, err = db.Exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
  CREATE TABLE IF NOT EXISTS managed_accounts (id TEXT PRIMARY KEY,member_id INTEGER UNIQUE,deleted INTEGER NOT NULL DEFAULT 0);
+ CREATE TABLE IF NOT EXISTS assistant_connection (id INTEGER PRIMARY KEY CHECK(id=1),body TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS api_budget (id INTEGER PRIMARY KEY CHECK(id=1),body TEXT NOT NULL);`); err != nil {
 		db.Close()
 		return nil, err
 	}
-	a := &Accounts{DB: db, dir: dir, engines: map[string]*Engine{}, Budget: &APIBudget{DB: db}}
+	a := &Accounts{connectionClient: &http.Client{Timeout: 25 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, DB: db, dir: dir, engines: map[string]*Engine{}, Budget: &APIBudget{DB: db}}
 	a.verificationTransport = func(proxy ProxyConfig) http.RoundTripper {
 		return proxyTransport(http.DefaultTransport.(*http.Transport), proxy.Mode, proxy.URL)
 	}
@@ -438,6 +441,18 @@ func (a *Accounts) collect(ctx context.Context, now time.Time, cursor *int) erro
 
 func (a *Accounts) Run(ctx context.Context) {
 	var wg sync.WaitGroup
+	wg.Go(func() {
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				_ = a.SyncConnection(ctx, time.Now())
+			}
+		}
+	})
 	for _, deliver := range []bool{false, true} {
 		wg.Add(1)
 		go func() {

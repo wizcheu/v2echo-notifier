@@ -1,3 +1,4 @@
+import AssistantConnection from './AssistantConnection'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import PushScheduleFields, { defaultPushSchedule, scheduleError, scheduleDescription, beijingTime } from './PushSchedule'
@@ -416,7 +417,8 @@ export default function AccountWorkspace({
         </section>
       )}
       {onboarding && <div className="onboarding content-surface">
-        <ol className="connection-steps"><li><Icon name="check_circle" /><div><strong>账号验证</strong><small>已完成</small></div></li><li><Icon name="time" /><div><strong>配对设备</strong><small>当前步骤</small></div></li><li><Icon name={config.enabled ? "check_circle" : "time"} /><div><strong>启用同步</strong><small>{config.enabled ? '已启用' : '下一步'}</small></div></li></ol>
+        <ol className="connection-steps"><li><Icon name="check_circle" /><div><strong>账号验证</strong><small>已完成</small></div></li><li><Icon name="time" /><div><strong>连接设备</strong><small>当前步骤</small></div></li><li><Icon name={config.enabled ? "check_circle" : "time"} /><div><strong>启用同步</strong><small>{config.enabled ? '已启用' : '下一步'}</small></div></li></ol>
+        <p className="muted">如果已在 App 启用此助手的多账号复用，当前账号无需再次扫码或输入配对码。可先到<a href={href('device')}>接收设备</a>同步账号连接，再回到 App 登录此账号并刷新连接状态。</p>
         <section><PairingQR key={accountID} accountID={accountID} username={state.username} cookie={pairCookie} disabled={busy || (!config.cookie_configured && !pairCookie)} onExpired={onExpired} onPaired={pairingSucceeded} />
           <h2>或填写 App 配对码</h2><p className="muted">原有手动方式仍可使用：在 App 生成配对码后，粘贴到下方。</p>
           <label>配对码<input value={pairCode} onChange={e => setPairCode(e.target.value)} disabled={busy} maxLength={28} autoComplete="off" placeholder="输入 V2E-…" /></label>
@@ -738,6 +740,7 @@ export default function AccountWorkspace({
               发送测试推送
             </a>
           </section>
+          <AssistantConnection onExpired={onExpired} />
           <section className="panel">
             <div className="section-heading">
               <h2>{pairingBlocked ? '重新配对接收设备' : relayReady ? '更换接收设备' : '配对接收设备'}</h2>
