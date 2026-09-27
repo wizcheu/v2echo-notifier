@@ -17,6 +17,8 @@ import (
 	"time"
 )
 
+const managementSessionLifetime = 30 * 24 * time.Hour
+
 type Server struct {
 	Accounts      *Accounts
 	Assets        fs.FS
@@ -356,9 +358,9 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	if len(s.sessions) >= 32 {
 		s.sessions = map[string]time.Time{}
 	}
-	s.sessions[token] = now.Add(12 * time.Hour)
+	s.sessions[token] = now.Add(managementSessionLifetime)
 	s.mu.Unlock()
-	http.SetCookie(w, &http.Cookie{Name: "notifier_session", Value: token, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: s.SecureCookies || r.TLS != nil, MaxAge: 43200})
+	http.SetCookie(w, &http.Cookie{Name: "notifier_session", Value: token, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: s.SecureCookies || r.TLS != nil, MaxAge: int(managementSessionLifetime / time.Second)})
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 

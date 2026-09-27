@@ -84,7 +84,7 @@ ssh -L 8282:127.0.0.1:8282 user@your-server
 
 ## 管理密钥与登录
 
-服务日志只显示密钥文件的位置，不显示密钥本身。首次创建的密钥保存在 `data/admin-token`；管理会话只存于浏览器的 HttpOnly、SameSite=Strict Cookie，12 小时过期，程序重启后需重新登录。
+服务日志只显示密钥文件的位置，不显示密钥本身。首次创建的密钥保存在 `data/admin-token`；浏览器通过 HttpOnly、SameSite=Strict Cookie 保存管理会话凭据，服务端会话保存在内存中。登录后固定 30 天过期，访问页面不会续期；主动退出或程序重启后需重新登录。
 
 Docker 部署时，数据目录对应容器中的 `/data`，管理密钥位于 `/data/admin-token`。忘记密钥时重新运行本页的 `-print-admin-token` 命令读取原值，不需要删除数据卷。
 

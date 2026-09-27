@@ -64,13 +64,22 @@ func TestManagementAuthenticationAndSecretRedaction(t *testing.T) {
 	if res := request("POST", "/api/login", string(raw), "http://attacker.example", nil); res.Code != 403 {
 		t.Fatal("cross-origin login allowed")
 	}
+	beforeLogin := time.Now()
 	login := request("POST", "/api/login", string(raw), "http://localhost", nil)
+	afterLogin := time.Now()
 	if login.Code != 200 {
 		t.Fatal(login.Body.String())
 	}
 	cookies := login.Result().Cookies()
 	if len(cookies) != 1 || !cookies[0].HttpOnly || cookies[0].SameSite != http.SameSiteStrictMode {
 		t.Fatal("unsafe session cookie")
+	}
+	if cookies[0].MaxAge != 30*24*60*60 {
+		t.Fatal("management cookie must last 30 days")
+	}
+	expiry := server.sessions[cookies[0].Value]
+	if expiry.Before(beforeLogin.Add(30*24*time.Hour)) || expiry.After(afterLogin.Add(30*24*time.Hour)) {
+		t.Fatal("management session must expire 30 days after login")
 	}
 	for _, payload := range []string{`{"api_token":"only-token"}`, `{"cookie":"A2=only-cookie"}`, `{"api_token":"token","cookie":"wrong=value"}`} {
 		if missing := request("POST", "/api/accounts", payload, "", cookies[0]); missing.Code != 400 {
