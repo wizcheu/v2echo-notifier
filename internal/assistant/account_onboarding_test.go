@@ -178,7 +178,7 @@ func TestAccountHTTPRejectsMismatchAndSavesDraftProxyAfterVerification(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.sessions["synthetic-session"] = time.Now().Add(time.Hour)
+	seedManagementSession(t, s, "synthetic-session", time.Now().Add(time.Hour))
 	handler := s.Handler()
 	for _, username := range []string{"Tester", "tester"} {
 		mockAccountVerification(t, a, 7, username)

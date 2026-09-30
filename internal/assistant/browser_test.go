@@ -245,7 +245,7 @@ func TestBrowserRoutesRequireSessionAndDesktopDoesNotForwardCredentials(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.sessions["viewer"] = time.Now().Add(time.Hour)
+	seedManagementSession(t, s, "viewer", time.Now().Add(time.Hour))
 	h := s.Handler()
 	request := func(path, method, session, origin, header string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(method, "http://localhost"+path, strings.NewReader("{}"))
@@ -483,7 +483,7 @@ func TestDesktopWebSocketClosesWhenVerificationLeaseEnds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.sessions["viewer"] = time.Now().Add(time.Hour)
+	seedManagementSession(t, s, "viewer", time.Now().Add(time.Hour))
 	server := httptest.NewServer(s.Handler())
 	defer server.Close()
 	cfg, err := websocket.NewConfig("ws"+strings.TrimPrefix(server.URL, "http")+"/browser-desktop/websocket", server.URL)

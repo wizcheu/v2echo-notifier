@@ -77,7 +77,7 @@ func TestManagementAuthenticationAndSecretRedaction(t *testing.T) {
 	if cookies[0].MaxAge != 30*24*60*60 {
 		t.Fatal("management cookie must last 30 days")
 	}
-	expiry := server.sessions[cookies[0].Value]
+	expiry := managementSessionExpiry(t, server, cookies[0].Value)
 	if expiry.Before(beforeLogin.Add(30*24*time.Hour)) || expiry.After(afterLogin.Add(30*24*time.Hour)) {
 		t.Fatal("management session must expire 30 days after login")
 	}
@@ -239,7 +239,7 @@ func TestPushTestManagementRoutesAndFixedService(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server.sessions["synthetic-session"] = time.Now().Add(time.Hour)
+	seedManagementSession(t, server, "synthetic-session", time.Now().Add(time.Hour))
 	request := func(method, path, body string, auth bool) *httptest.ResponseRecorder {
 		t.Helper()
 		req := httptest.NewRequest(method, "http://localhost/api/accounts/"+id+"/"+path, strings.NewReader(body))

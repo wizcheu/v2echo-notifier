@@ -25,7 +25,6 @@ type Server struct {
 	SecureCookies bool
 	adminHash     [32]byte
 	mu            sync.Mutex
-	sessions      map[string]time.Time
 	loginWindow   time.Time
 	loginAttempts int
 }
@@ -36,7 +35,11 @@ func NewServer(accounts *Accounts, assets fs.FS, dir string) (*Server, error) {
 		return nil, err
 	}
 	hash := sha256.Sum256([]byte(base64.RawURLEncoding.EncodeToString(secret)))
-	return &Server{Accounts: accounts, Assets: assets, adminHash: hash, sessions: map[string]time.Time{}}, nil
+	server := &Server{Accounts: accounts, Assets: assets, adminHash: hash}
+	if err := server.cleanManagementSessions(time.Now()); err != nil {
+		return nil, err
+	}
+	return server, nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -68,9 +71,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/login", s.login)
 	mux.HandleFunc("POST /api/logout", s.authorized(func(w http.ResponseWriter, r *http.Request) {
 		c, _ := r.Cookie("notifier_session")
-		s.mu.Lock()
-		delete(s.sessions, c.Value)
-		s.mu.Unlock()
+		if err := s.revokeManagementSession(c.Value); err != nil {
+			fail(w, 500, "无法撤销管理会话，请重试退出")
+			return
+		}
 		if b := s.Accounts.Browser; b != nil {
 			b.mu.Lock()
 			if b.viewer == c.Value {
@@ -301,13 +305,11 @@ func (s *Server) authorized(next http.HandlerFunc) http.HandlerFunc {
 			fail(w, 401, "请先登录管理页")
 			return
 		}
-		s.mu.Lock()
-		expiry, ok := s.sessions[c.Value]
-		if ok && !expiry.After(time.Now()) {
-			delete(s.sessions, c.Value)
-			ok = false
+		ok, err := s.validManagementSession(c.Value, time.Now())
+		if err != nil {
+			fail(w, 500, "无法验证管理会话，请稍后重试")
+			return
 		}
-		s.mu.Unlock()
 		if !ok {
 			fail(w, 401, "管理会话已过期，请重新登录")
 			return
@@ -349,17 +351,10 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	token := base64.RawURLEncoding.EncodeToString(raw)
-	s.mu.Lock()
-	for k, t := range s.sessions {
-		if !t.After(now) {
-			delete(s.sessions, k)
-		}
+	if err := s.createManagementSession(token, now); err != nil {
+		fail(w, 500, "无法保存管理会话")
+		return
 	}
-	if len(s.sessions) >= 32 {
-		s.sessions = map[string]time.Time{}
-	}
-	s.sessions[token] = now.Add(managementSessionLifetime)
-	s.mu.Unlock()
 	http.SetCookie(w, &http.Cookie{Name: "notifier_session", Value: token, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: s.SecureCookies || r.TLS != nil, MaxAge: int(managementSessionLifetime / time.Second)})
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }

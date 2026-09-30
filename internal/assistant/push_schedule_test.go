@@ -302,7 +302,7 @@ func TestPushScheduleHTTPConfigAndRestResponses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server.sessions["schedule-session"] = time.Now().Add(time.Hour)
+	seedManagementSession(t, server, "schedule-session", time.Now().Add(time.Hour))
 	request := func(method, suffix, body string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(method, "http://localhost/api/accounts/"+id+suffix, strings.NewReader(body))
 		r.AddCookie(&http.Cookie{Name: "notifier_session", Value: "schedule-session"})

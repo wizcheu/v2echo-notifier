@@ -25,7 +25,7 @@ func TestSavedConfigurationRequiresSessionAndSameOriginAndStaysAccountScoped(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	server.sessions["synthetic-session"] = time.Now().Add(time.Hour)
+	seedManagementSession(t, server, "synthetic-session", time.Now().Add(time.Hour))
 	handler := server.Handler()
 	request := func(path string, session bool, origin, header string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(http.MethodGet, "http://localhost/api/accounts/"+path, nil)
@@ -96,7 +96,7 @@ func TestSavedConfigurationRequiresSessionAndSameOriginAndStaysAccountScoped(t *
 	if err != nil || after.APIToken != cfg.APIToken || after.Cookie != cfg.Cookie || after.RelayToken != cfg.RelayToken || after.ProxyURL != cfg.ProxyURL || after.IntervalSeconds != 300 || !stateOf(t, engine.Store).Verified {
 		t.Fatal("saving a prefilled form changed unrelated settings or verification")
 	}
-	server.sessions["synthetic-session"] = time.Now().Add(-time.Second)
+	seedManagementSession(t, server, "synthetic-session", time.Now().Add(-time.Second))
 	if expired := request(id+"/config", true, "http://localhost", "1"); expired.Code != 401 {
 		t.Fatal("expired session could read credentials")
 	}

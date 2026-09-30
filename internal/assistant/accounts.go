@@ -21,7 +21,7 @@ var ErrAccountRemoved = errors.New("账号配置已移除")
 var profileID = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
 // Each account owns its database and encryption key. The registry contains only
-// profile membership and the budget shared by this notifier's outbound calls.
+// profile membership, management sessions and the shared outbound request budget.
 type Accounts struct {
 	connectionClient      *http.Client
 	reuseMu               sync.Mutex
@@ -69,6 +69,9 @@ func OpenAccounts(dir string) (*Accounts, error) {
 	if _, err = db.Exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
  CREATE TABLE IF NOT EXISTS managed_accounts (id TEXT PRIMARY KEY,member_id INTEGER UNIQUE,deleted INTEGER NOT NULL DEFAULT 0);
  CREATE TABLE IF NOT EXISTS assistant_connection (id INTEGER PRIMARY KEY CHECK(id=1),body TEXT NOT NULL);
+ CREATE TABLE IF NOT EXISTS management_sessions (
+   token_hash BLOB PRIMARY KEY, admin_binding BLOB NOT NULL,
+   created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
  CREATE TABLE IF NOT EXISTS api_budget (id INTEGER PRIMARY KEY CHECK(id=1),body TEXT NOT NULL);`); err != nil {
 		db.Close()
 		return nil, err
