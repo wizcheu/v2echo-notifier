@@ -34,7 +34,7 @@ func TestDeliveryHistoryTracksAttemptsReceiptsAndAtomicity(t *testing.T) {
 		t.Fatal("rolled-back attempt left history")
 	}
 	calls := 0
-	e.Relay = &http.Client{Transport: transportFunc(func(*http.Request) (*http.Response, error) {
+	e.Relay = &http.Client{Transport: detailedTransport(func(*http.Request) (*http.Response, error) {
 		calls++
 		// Reservation and timing must already be durable before network I/O.
 		item := historyOne(t, e.Store)

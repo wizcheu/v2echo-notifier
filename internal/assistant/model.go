@@ -18,39 +18,52 @@ type Config struct {
 }
 
 type State struct {
-	AvatarURL          string    `json:"avatar_url"`
-	CheckRequested     bool      `json:"check_requested,omitempty"`
-	TokenIssue         string    `json:"token_issue"`
-	CookieIssue        string    `json:"cookie_issue"`
-	TokenCheckedAt     time.Time `json:"token_checked_at"`
-	CookieCheckedAt    time.Time `json:"cookie_checked_at"`
-	NextTokenCheck     time.Time `json:"next_token_check"`
-	HasPushAPIID       bool      `json:"has_push_api_id"`
-	LastPushAPIID      int64     `json:"last_push_api_id"`
-	NextWeb            time.Time `json:"next_web"`
-	HasWebUnread       bool      `json:"has_web_unread"`
-	WebUnreadCount     int       `json:"web_unread_count"`
-	WebObservedAt      time.Time `json:"web_observed_at"`
-	InitialPairingDone bool      `json:"initial_pairing_done"`
-	InitialUnreadCount int       `json:"initial_unread_count"`
-	InitialUnreadAt    time.Time `json:"initial_unread_at"`
-	AccountID          int64     `json:"account_id"`
-	Username           string    `json:"username"`
-	Verified           bool      `json:"verified"`
-	Phase              string    `json:"phase"`
-	Page               int       `json:"page"`
-	AnchorID           int64     `json:"anchor_id"`
-	AnchorSet          bool      `json:"anchor_set"`
-	HighWater          int64     `json:"high_water"`
-	CycleMax           int64     `json:"cycle_max"`
-	LastPageMinID      int64     `json:"last_page_min_id"`
-	NextCheck          time.Time `json:"next_check"`
-	NextAPI            time.Time `json:"next_api"`
-	LastSuccess        time.Time `json:"last_success"`
-	LastError          string    `json:"last_error"`
-	Failures           int       `json:"failures"`
-	AuthBlocked        bool      `json:"auth_blocked"`
-	Quota              Quota     `json:"quota"`
+	UnreadScan         *UnreadScan `json:"unread_scan,omitempty"`
+	AvatarURL          string      `json:"avatar_url"`
+	CheckRequested     bool        `json:"check_requested,omitempty"`
+	TokenIssue         string      `json:"token_issue"`
+	CookieIssue        string      `json:"cookie_issue"`
+	TokenCheckedAt     time.Time   `json:"token_checked_at"`
+	CookieCheckedAt    time.Time   `json:"cookie_checked_at"`
+	NextTokenCheck     time.Time   `json:"next_token_check"`
+	HasPushAPIID       bool        `json:"has_push_api_id"`
+	LastPushAPIID      int64       `json:"last_push_api_id"`
+	NextWeb            time.Time   `json:"next_web"`
+	HasWebUnread       bool        `json:"has_web_unread"`
+	WebUnreadCount     int         `json:"web_unread_count"`
+	WebObservedAt      time.Time   `json:"web_observed_at"`
+	InitialPairingDone bool        `json:"initial_pairing_done"`
+	InitialUnreadCount int         `json:"initial_unread_count"`
+	InitialUnreadAt    time.Time   `json:"initial_unread_at"`
+	AccountID          int64       `json:"account_id"`
+	Username           string      `json:"username"`
+	Verified           bool        `json:"verified"`
+	Phase              string      `json:"phase"`
+	Page               int         `json:"page"`
+	AnchorID           int64       `json:"anchor_id"`
+	AnchorSet          bool        `json:"anchor_set"`
+	HighWater          int64       `json:"high_water"`
+	CycleMax           int64       `json:"cycle_max"`
+	LastPageMinID      int64       `json:"last_page_min_id"`
+	NextCheck          time.Time   `json:"next_check"`
+	NextAPI            time.Time   `json:"next_api"`
+	LastSuccess        time.Time   `json:"last_success"`
+	LastError          string      `json:"last_error"`
+	Failures           int         `json:"failures"`
+	AuthBlocked        bool        `json:"auth_blocked"`
+	Quota              Quota       `json:"quota"`
+}
+
+// A page cursor is only tentative until the first page has been checked again.
+// Candidate IDs live in SQLite, so even large unread ranges survive restart.
+type UnreadScan struct {
+	Count      int       `json:"count"`
+	Page       int       `json:"page"`
+	Collected  int       `json:"collected"`
+	HeadIDs    []int64   `json:"head_ids,omitempty"`
+	LastMinID  int64     `json:"last_min_id"`
+	Verify     bool      `json:"verify"`
+	ObservedAt time.Time `json:"observed_at"`
 }
 
 type Notification struct {
@@ -62,23 +75,30 @@ type Notification struct {
 	PayloadRendered string  `json:"payload_rendered"`
 	Created         int64   `json:"created"`
 	Member          struct {
-		Username string `json:"username"`
+		Username     string `json:"username"`
+		AvatarLarge  string `json:"avatar_large,omitempty"`
+		AvatarNormal string `json:"avatar_normal,omitempty"`
+		AvatarMini   string `json:"avatar_mini,omitempty"`
 	} `json:"member"`
 }
 
 // Event is a notification, initial unread summary, or explicitly requested test.
 // Reposts preserve its identity and content even if the source later changes.
 type Event struct {
-	EventID         string    `json:"event_id"`
-	Type            string    `json:"type"`
-	SourceAccountID int64     `json:"source_account_id"`
-	NotificationID  int64     `json:"notification_id,omitempty"`
-	BindingID       string    `json:"binding_id,omitempty"`
-	UnreadCount     int       `json:"unread_count,omitempty"`
-	Title           string    `json:"title"`
-	Body            string    `json:"body"`
-	CreatedAt       time.Time `json:"created_at"`
-	ExpiresAt       time.Time `json:"expires_at"`
+	NotificationKind string    `json:"notification_kind,omitempty"`
+	TestKind         string    `json:"test_kind,omitempty"`
+	DetailsVersion   int       `json:"details_version,omitzero"`
+	AvatarURL        string    `json:"avatar_url,omitempty"`
+	EventID          string    `json:"event_id"`
+	Type             string    `json:"type"`
+	SourceAccountID  int64     `json:"source_account_id"`
+	NotificationID   int64     `json:"notification_id,omitempty"`
+	BindingID        string    `json:"binding_id,omitempty"`
+	UnreadCount      int       `json:"unread_count,omitempty"`
+	Title            string    `json:"title"`
+	Body             string    `json:"body"`
+	CreatedAt        time.Time `json:"created_at"`
+	ExpiresAt        time.Time `json:"expires_at"`
 }
 
 type Delivery struct {

@@ -1,0 +1,22 @@
+{
+  "body": "这是一条合成通知：hello 👋，标题与正文只在设备上显示。",
+  "private_key": "MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTE",
+  "public_key": "BPXykWLDGo3voY5udCIk7oBvwXGKJ4voWbpWIEArjzo",
+  "title": "测试用户 提及了你 👋",
+  "user_info": {
+    "binding_id": "22222222-2222-4222-8222-222222222222",
+    "body_encryption": 2,
+    "encrypted_body": {
+      "binding_id": "22222222-2222-4222-8222-222222222222",
+      "ciphertext": "QrKPD_KZ1FxdrsIMdkv3Qxa3GGvZsktMXQmHL3k3VRJII7B-5hASxgUzhbxGCSRMf_CQrcie4uspffmn6kFLg-5LDmXAkGGNhHE7HR-oIDSybWC3nLeUxxRcJZwOaNZtHuo3kX0Lmlds1cnQph9QuhVbdZh1WGHvmkJHYtzHEA",
+      "device_id": "11111111-1111-4111-8111-111111111111",
+      "ephemeral_key": "WdkiVHNFHv_-azbbyu_b97GJXeYghFCaf1tYvwHQZBg",
+      "key_id": "67bae02a79edbd95ef33754bbe2cbc66f26b1aa09e39bc7fcc08002d68bb825c",
+      "nonce": "c3ludGhldGljMTIz"
+    },
+    "event_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "installation_id": "11111111-1111-4111-8111-111111111111",
+    "source_account_id": 7,
+    "username": "tester"
+  }
+}

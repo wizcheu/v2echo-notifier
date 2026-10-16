@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { PushHistoryItem } from './PushHistory'
 import { deliveryDetail } from './deliveryDetail'
 import Icon from './Icon'
@@ -5,7 +6,8 @@ import { formatTime } from './formatTime'
 
 export const pushServiceURL = 'https://app.v2echo.com/api/push'
 export const pushTestBody = '这是一条 V2Echo 测试推送，收到此消息说明推送已到达设备。'
-export type PushTestState = { next_allowed: number; latest: PushHistoryItem | null }
+export type PushTestSample = { kind: string; label: string; title: string; body: string; avatar_url: string }
+export type PushTestState = { next_allowed: number; latest: PushHistoryItem | null; samples?: PushTestSample[] }
 const statuses: Record<string, string> = {
   pending: '待处理',
   apns_accepted: 'APNs 已接收',
@@ -27,7 +29,7 @@ type Props = {
   busy: boolean
   nextSync: number
   state: PushTestState
-  onSend: () => void
+  onSend: (kind: string) => void
   onSettings: () => void
   onHistory: () => void
 }
@@ -47,6 +49,8 @@ export default function PushTest({
   onSettings,
   onHistory,
 }: Props) {
+  const [kind, setKind] = useState('')
+  const sample = state.samples?.find(item => item.kind === kind)
   const latest = state.latest
   const waitingReceipt = latest?.status === 'pending' && latest.submitted
   const receiptNext = Math.max(nextSync, latest?.next_attempt ?? 0)
@@ -66,19 +70,28 @@ export default function PushTest({
   if (latest && (pending || waitingReceipt)) return <div className="push-test waiting-test content-surface">
     <div className="notice" role="status"><Icon name="check_circle" /><div><strong>{waitingReceipt ? '已上报，等待回执' : '测试已创建，等待上报'}</strong><p>{!enabled ? '同步已暂停，启用后继续处理。' : resting ? `休息时段，${resumeText}；恢复后仍遵守冷却与有效期。` : blocked ? '请重新配对后恢复。' : `下次允许${waitingReceipt ? '查询回执' : '上报'}：${at(receiptNext)}。刷新页面不会提前查询或重新发送。`}</p></div></div>
     <ol className="process-timeline"><li><Icon name="check_circle" /><div><h2>测试已创建</h2><p>{formatTime(latest.created_at)}</p></div></li><li><Icon name={latest.submitted ? 'check_circle' : 'time'} /><div><h2>{latest.submitted ? '已完成首次上报' : '等待首次上报'}</h2><p>{at(latest.first_attempt_at)}</p></div></li><li><Icon name="time" /><div><h2>{waitingReceipt ? '等待下一轮回执查询' : '等待服务端确认'}</h2><p>{at(receiptNext)}</p></div></li></ol>
+    <h3>{latest.title}</h3><p>{latest.body}</p>
     <h3>手机可能已先收到通知，回执会在后续轮次更新。</h3><p className="caption">页面每 5 秒读取本地记录；测试有效期 15 分钟，上一条处理中不重复创建。</p>
-    <div className="test-actions"><button disabled={busy || !ready || cooling || pending} onClick={onSend}>{resting ? '休息时段，暂不测试' : pending ? '等待测试结果' : '发送测试推送'}</button><button className="text-button" onClick={onHistory}>查看推送历史</button>{!ready && <button onClick={onSettings}>连接与设置</button>}</div>
+    <div className="test-actions"><button disabled={busy || !ready || cooling || pending} onClick={() => onSend(kind)}>{resting ? '休息时段，暂不测试' : pending ? '等待测试结果' : '发送测试推送'}</button><button className="text-button" onClick={onHistory}>查看推送历史</button>{!ready && <button onClick={onSettings}>连接与设置</button>}</div>
   </div>
   return (
     <div className="settings push-test content-surface">
       <section className="panel">
+        <label className="test-kind">测试类型
+          <select value={kind} disabled={busy || pending} onChange={event => setKind(event.target.value)}>
+            <option value="">连通性测试</option>
+            {(state.samples ?? []).map(item => <option key={item.kind} value={item.kind}>{item.label}</option>)}
+          </select>
+        </label>
         <div className="test-composer">
           <div className="push-preview">
             <span className="preview-app">
               本次测试消息
             </span>
-            <h3>{username ? `@${username}` : '@用户名'}</h3>
-            <p>{pushTestBody}</p>
+            {sample && <img className="push-avatar" src={sample.avatar_url} alt="指定测试头像" referrerPolicy="no-referrer" />}
+            <h3>{sample?.title ?? (username ? `@${username}` : '@用户名')}</h3>
+            <p>{sample?.body ?? pushTestBody}</p>
+            {sample && <p className="caption">虚构用户与文案，使用指定公开测试头像。标题与正文加密传输；新版 iOS 解密后以通讯通知突出头像，以「用户名＋动作」作为显示名称生成主标题，正文保留具体内容。旧版 App 或密钥不可用时显示通用提醒。</p>}
           </div>
           <div className="test-prerequisites" aria-label="发送条件">
             <h2>发送条件</h2>
@@ -104,10 +117,10 @@ export default function PushTest({
           </div>
         )}
         <div className="test-actions">
-          <button className="primary" type="button" disabled={busy || !ready || cooling || pending} onClick={onSend}>
+          <button className="primary" type="button" disabled={busy || !ready || cooling || pending} onClick={() => onSend(kind)}>
             {resting ? '休息时段，暂不测试' : busy ? '正在提交…' : pending ? '等待测试结果' : cooling ? '测试冷却中' : '发送测试推送'}
           </button>
-          <p className="caption">每 3 分钟可创建一次；上一条未结束时需等待。</p>
+          <p className="caption">每 30 秒可创建一次；上一条未结束时需等待。</p>
         </div>
 
         {cooling && <p className="caption">下次可创建测试：{at(state.next_allowed)}</p>}
@@ -135,8 +148,8 @@ export default function PushTest({
             <p role="status">{deliveryDetail(latest)}</p>
             {waitingReceipt && (
               <p className="caption">
-                手机可能已先收到通知。页面每 5 秒读取本地记录，推送回执则至少间隔 3
-                分钟查询；刷新页面不会提前查询或重新发送。
+                手机可能已先收到通知。页面每 5 秒读取本地记录，推送回执则至少间隔 30
+                秒查询；刷新页面不会提前查询或重新发送。
               </p>
             )}
             <dl className="details test-timeline">

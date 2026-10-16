@@ -101,6 +101,9 @@ func OpenStore(dir string) (*Store, error) {
         submitted INTEGER NOT NULL DEFAULT 0, attempts INTEGER NOT NULL DEFAULT 0,
         priority INTEGER NOT NULL DEFAULT 0, next_attempt INTEGER NOT NULL DEFAULT 0, detail TEXT NOT NULL DEFAULT '');
       CREATE INDEX IF NOT EXISTS outbox_due ON outbox(status,next_attempt);
+      CREATE TABLE IF NOT EXISTS notification_key_pins (device_id TEXT PRIMARY KEY, public_key TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS encrypted_notification_wire (event_id TEXT PRIMARY KEY, payload TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS unread_scan_items (id INTEGER PRIMARY KEY);
       CREATE TABLE IF NOT EXISTS push_test_schedule (id INTEGER PRIMARY KEY CHECK(id=1),next_allowed INTEGER NOT NULL DEFAULT 0,event_id TEXT NOT NULL DEFAULT '');
       INSERT OR IGNORE INTO push_test_schedule(id) VALUES(1);
       CREATE TABLE IF NOT EXISTS delivery_history (
@@ -261,13 +264,6 @@ func (s *Store) saveConfig(c Config, v State, retryBlocked, retireOld bool, init
 			return err
 		}
 	}
-	if c.Cookie != "" {
-		if _, err = tx.Exec(`UPDATE outbox SET status='skipped',detail='已启用网页汇总，尚未尝试的旧版提醒已跳过'
-		 WHERE status IN ('pending','blocked') AND submitted=0 AND attempts=0
-		 AND json_extract(payload,'$.type') IN ('notification','initial_unread')`); err != nil {
-			return err
-		}
-	}
 	if initial != nil {
 		payload, err := json.Marshal(initial)
 		if err != nil {
@@ -313,7 +309,8 @@ func (s *Store) importPage(v State, items []Notification, notify bool, summary *
 		}
 		if notify && n.ID > v.AnchorID {
 			sum := sha256.Sum256([]byte(fmt.Sprintf("v2ex:%d:%d", v.AccountID, n.ID)))
-			ev := Event{EventID: hex.EncodeToString(sum[:]), Type: "notification", SourceAccountID: v.AccountID, NotificationID: n.ID, Title: title, Body: body, CreatedAt: time.Unix(n.Created, 0).UTC(), ExpiresAt: time.Unix(n.Created, 0).UTC().Add(24 * time.Hour)}
+			_, _, kind := notificationPresentation(n, v.Username)
+			ev := Event{NotificationKind: kind, EventID: hex.EncodeToString(sum[:]), Type: "notification", SourceAccountID: v.AccountID, NotificationID: n.ID, Title: title, Body: body, CreatedAt: time.Unix(n.Created, 0).UTC(), ExpiresAt: time.Unix(n.Created, 0).UTC().Add(24 * time.Hour)}
 			payload, err := json.Marshal(ev)
 			if err != nil {
 				return err
@@ -383,7 +380,7 @@ func (s *Store) EraseAccount() error {
 		return err
 	}
 	defer tx.Rollback()
-	for _, table := range []string{"browser_session", "settings", "sync_state", "notifications", "outbox", "delivery_history", "check_history", "push_test_schedule", "pending_pairing", "pairing_invitation", "relay_schedule"} {
+	for _, table := range []string{"browser_session", "settings", "sync_state", "notifications", "unread_scan_items", "notification_key_pins", "encrypted_notification_wire", "outbox", "delivery_history", "check_history", "push_test_schedule", "pending_pairing", "pairing_invitation", "relay_schedule"} {
 		if _, err = tx.Exec("DELETE FROM " + table); err != nil {
 			return err
 		}

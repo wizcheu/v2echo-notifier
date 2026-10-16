@@ -1,8 +1,33 @@
 import { test, expect } from '@playwright/test'
 import type { Page } from '@playwright/test'
 
+test('all five notification samples preview and send independent idempotent test kinds', async ({page}) => {
+  const {writes,errors}=await fixture(page,{samples:true})
+  await page.goto('/#/accounts/a/push-test')
+  const select=page.getByLabel('测试类型')
+  await expect(select.locator('option')).toHaveCount(6)
+  for (const kind of ['reply','mention','thanks_topic','thanks_reply','favorite']) {
+    await select.selectOption(kind)
+    await expect(page.locator('.push-preview h3')).toContainText('测试用户')
+    await expect(page.getByAltText('虚构测试用户头像')).toBeVisible()
+    await expect(page.locator('.push-preview')).toContainText('由系统决定')
+    await page.getByRole('button',{name:'发送测试推送',exact:true}).click()
+    await expect(page.getByRole('button',{name:'发送测试推送',exact:true})).toBeEnabled()
+    expect(writes.at(-1)?.body.test_kind).toBe(kind)
+    expect(writes.at(-1)?.path).toBe('/api/accounts/a/push-test')
+  }
+  expect(new Set(writes.map(write=>write.body.event_id)).size).toBe(5)
+  await select.selectOption('')
+  await expect(page.getByAltText('虚构测试用户头像')).toHaveCount(0)
+  await expect(page.locator('.push-preview h3')).toHaveText('@sample')
+  await page.setViewportSize({width:390,height:844})
+  await select.selectOption('thanks_reply')
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true)
+  expect(errors).toEqual([])
+})
+
 // All endpoints are intercepted. These accounts, credentials and events are synthetic.
-async function fixture(page: Page, options: { authenticated?: boolean; empty?: boolean; blocked?: boolean; resting?: boolean; pairingBlocked?: boolean } = {}) {
+async function fixture(page: Page, options: { authenticated?: boolean; empty?: boolean; blocked?: boolean; resting?: boolean; pairingBlocked?: boolean; samples?: boolean } = {}) {
   let authenticated = options.authenticated ?? true
   const writes: { path: string; body: any }[] = []
   const errors: string[] = []
@@ -160,7 +185,13 @@ async function fixture(page: Page, options: { authenticated?: boolean; empty?: b
           { id: 2, title: '另一条通知', body: '保留完整的内容与时间。', created: 1789263600 },
         ],
         deliveries: [],
-        push_test: { next_allowed: 0, latest: entry() },
+        push_test: { next_allowed: 0, latest: options.samples ? null : entry(), samples: options.samples ? [
+          {kind:'reply',label:'回复',title:'测试用户 回复了你的主题',body:'具体回复内容'},
+          {kind:'mention',label:'提及',title:'测试用户 提到了你',body:'去掉本人提及后的内容'},
+          {kind:'thanks_topic',label:'感谢主题',title:'测试用户 感谢了你的主题',body:'原主题标题'},
+          {kind:'thanks_reply',label:'感谢回复',title:'测试用户 感谢了你的回复',body:'被感谢的回复内容'},
+          {kind:'favorite',label:'收藏主题',title:'测试用户 收藏了你的主题',body:'原主题标题'},
+        ].map(sample=>({...sample,avatar_url:'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aUioAAAAASUVORK5CYII='})) : [] },
       })
     return respond({ error: 'Unexpected fixture request' }, 404)
   })

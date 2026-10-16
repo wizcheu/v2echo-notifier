@@ -19,7 +19,7 @@ func TestInvalidPairingPausesChecksUntilSuccessfulPair(t *testing.T) {
 				t.Fatal(err)
 			}
 			hybridStep(t, e)
-			e.Relay.Transport = transportFunc(func(*http.Request) (*http.Response, error) { return response(status, ""), nil })
+			e.Relay.Transport = detailedTransport(func(*http.Request) (*http.Response, error) { return response(status, ""), nil })
 			if err := e.Deliver(context.Background(), time.Now().Add(time.Minute)); err != nil {
 				t.Fatal(err)
 			}

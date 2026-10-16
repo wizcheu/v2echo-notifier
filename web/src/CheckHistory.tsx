@@ -126,7 +126,7 @@ export default function CheckHistory({ accountID, onExpired }: { accountID: stri
               {open && <div className="check-detail" id={`check-detail-${item.id}`}>
                 <h3>本次检查过程</h3>
                 <CheckStep title="网页首页" stage={item.web} extra={item.unread_count !== null ? `返回 ${item.unread_count} 条未读` : undefined} />
-                <CheckStep title={item.mode === 'api' ? 'API 通知同步' : 'API 首条消息确认'} stage={item.api} extra={`本次首条 ID：${item.first_id ?? '—'}${item.mode === 'web' ? ` · 上次推送基准：${item.previous_first_id ?? '尚未建立'}` : ''}`} />
+                <CheckStep title={item.mode === 'api' ? 'API 通知同步' : 'API 通知范围核对'} stage={item.api} extra={`本页首条 ID：${item.first_id ?? '—'}${item.mode === 'web' ? ` · 上次完成扫描首条 ID：${item.previous_first_id ?? '尚未建立'}` : ''}`} />
                 <div className="check-detail-footer"><div><p>{item.outcome}</p><small>完成于 {formatTime(item.finished_at)} · 总耗时 {duration(item.duration_ms)}</small></div>{item.event_id && <a className="text-link" href={`${accountHref(accountID, 'pushHistory')}?q=${encodeURIComponent(item.event_id)}`}>查看推送历史</a>}</div>
               </div>}
             </li>

@@ -120,7 +120,7 @@ func TestQuietHoursSkipChecksAndResumeAfterRestart(t *testing.T) {
 	setSchedule(t, e, defaultPushSchedule(), true)
 	webCalls := 0
 	transport := e.Web.Transport
-	e.Web.Transport = transportFunc(func(r *http.Request) (*http.Response, error) { webCalls++; return transport.RoundTrip(r) })
+	e.Web.Transport = detailedTransport(func(r *http.Request) (*http.Response, error) { webCalls++; return transport.RoundTrip(r) })
 	before := stateOf(t, e.Store)
 	for _, now := range []time.Time{beijing("2026-09-15 00:00:00"), beijing("2026-09-15 07:59:59")} {
 		if err := e.Step(context.Background(), now); err != nil {
@@ -180,7 +180,7 @@ func TestQuietHoursRelayWaitsForFreshCheck(t *testing.T) {
 	e, _ := relayFixture(t)
 	setSchedule(t, e, defaultPushSchedule(), true)
 	calls := 0
-	e.Relay.Transport = transportFunc(func(r *http.Request) (*http.Response, error) { calls++; return response(200, `{"receipts":[]}`), nil })
+	e.Relay.Transport = detailedTransport(func(r *http.Request) (*http.Response, error) { calls++; return response(200, `{"receipts":[]}`), nil })
 	if err := e.Deliver(context.Background(), beijing("2026-09-13 02:00:00")); err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +244,7 @@ func TestResumeSkipsOldZeroUnreadSummaryAndExpiredEvents(t *testing.T) {
 			t.Fatal(err)
 		}
 		calls := 0
-		e.Relay.Transport = transportFunc(func(*http.Request) (*http.Response, error) { calls++; return response(200, `{}`), nil })
+		e.Relay.Transport = detailedTransport(func(*http.Request) (*http.Response, error) { calls++; return response(200, `{}`), nil })
 		if !expired {
 			if err := e.Step(context.Background(), now); err != nil {
 				t.Fatal(err)
@@ -270,7 +270,7 @@ func TestResumeSkipsOldZeroUnreadSummaryAndExpiredEvents(t *testing.T) {
 func TestCheckCrossingWindowEndDoesNotStartAPI(t *testing.T) {
 	e, _, _, calls := hybridFixture(t)
 	setSchedule(t, e, defaultPushSchedule(), true)
-	e.Web.Transport = transportFunc(func(r *http.Request) (*http.Response, error) {
+	e.Web.Transport = detailedTransport(func(r *http.Request) (*http.Response, error) {
 		// Model a completed response body arriving at the cancellation boundary.
 		<-r.Context().Done()
 		return response(200, webPage("tester", 3)), nil

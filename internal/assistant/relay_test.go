@@ -39,7 +39,7 @@ func TestRelayWithoutPairingDoesNotSend(t *testing.T) {
 	if err := e.Store.DB.QueryRow("SELECT COUNT(*) FROM outbox WHERE status='pending'").Scan(&pending); err != nil || pending == 0 {
 		t.Fatalf("expected pending events to exercise unpaired delivery guard: count=%d err=%v", pending, err)
 	}
-	e.Relay = &http.Client{Transport: transportFunc(func(*http.Request) (*http.Response, error) {
+	e.Relay = &http.Client{Transport: detailedTransport(func(*http.Request) (*http.Response, error) {
 		t.Fatal("unpaired notifier must not submit events or query S2S receipts")
 		return nil, errors.New("unexpected S2S request")
 	})}
@@ -52,7 +52,7 @@ func TestRelayTimeoutReplaysThenPollsPendingReceipt(t *testing.T) {
 	e, now := relayFixture(t)
 	calls := 0
 	var eventID, original string
-	e.Relay = &http.Client{Transport: transportFunc(func(r *http.Request) (*http.Response, error) {
+	e.Relay = &http.Client{Transport: detailedTransport(func(r *http.Request) (*http.Response, error) {
 		calls++
 		if r.Header.Get("Authorization") != "Bearer test-relay-secret" {
 			t.Fatal("relay auth missing")
@@ -113,7 +113,7 @@ func TestRelayTimeoutReplaysThenPollsPendingReceipt(t *testing.T) {
 func TestRelayRejectsMismatchedAndUnknownReceipts(t *testing.T) {
 	for _, body := range []string{`{"event_id":"other","status":"apns_accepted"}`, `{not json}`} {
 		e, now := relayFixture(t)
-		e.Relay = &http.Client{Transport: transportFunc(func(*http.Request) (*http.Response, error) { return response(200, body), nil })}
+		e.Relay = &http.Client{Transport: detailedTransport(func(*http.Request) (*http.Response, error) { return response(200, body), nil })}
 		if err := e.Deliver(context.Background(), now); err != nil {
 			t.Fatal(err)
 		}
@@ -127,7 +127,7 @@ func TestRelayRejectsMismatchedAndUnknownReceipts(t *testing.T) {
 func TestRelayBlockedAndExpiredEvents(t *testing.T) {
 	e, now := relayFixture(t)
 	calls := 0
-	e.Relay = &http.Client{Transport: transportFunc(func(*http.Request) (*http.Response, error) { calls++; return response(401, ""), nil })}
+	e.Relay = &http.Client{Transport: detailedTransport(func(*http.Request) (*http.Response, error) { calls++; return response(401, ""), nil })}
 	if err := e.Deliver(context.Background(), now); err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func TestRelayBlockedAndExpiredEvents(t *testing.T) {
 		t.Fatal(ds)
 	}
 	e, now = relayFixture(t)
-	e.Relay = &http.Client{Transport: transportFunc(func(*http.Request) (*http.Response, error) { t.Fatal("expired event sent"); return nil, nil })}
+	e.Relay = &http.Client{Transport: detailedTransport(func(*http.Request) (*http.Response, error) { t.Fatal("expired event sent"); return nil, nil })}
 	if err := e.Deliver(context.Background(), now.Add(25*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestRelayBlockedAndExpiredEvents(t *testing.T) {
 func TestRelaySkipsPreBindingNotificationWithoutRetry(t *testing.T) {
 	e, now := relayFixture(t)
 	calls := 0
-	e.Relay = &http.Client{Transport: transportFunc(func(r *http.Request) (*http.Response, error) {
+	e.Relay = &http.Client{Transport: detailedTransport(func(r *http.Request) (*http.Response, error) {
 		calls++
 		var batch syncRequest
 		var event Event
@@ -178,7 +178,7 @@ func TestRelaySkipsPreBindingNotificationWithoutRetry(t *testing.T) {
 func TestRelayCooldownSurvivesRestartNewEventsAndReconfiguration(t *testing.T) {
 	e, now := relayFixture(t)
 	calls := 0
-	transport := transportFunc(func(r *http.Request) (*http.Response, error) {
+	transport := detailedTransport(func(r *http.Request) (*http.Response, error) {
 		calls++
 		var batch syncRequest
 		json.NewDecoder(r.Body).Decode(&batch)
@@ -198,7 +198,7 @@ func TestRelayCooldownSurvivesRestartNewEventsAndReconfiguration(t *testing.T) {
 	e.Store.SaveConfig(cfg, st, false)
 	e = NewEngine(e.Store)
 	e.Relay = &http.Client{Transport: transport}
-	if err := e.Deliver(context.Background(), now.Add(179*time.Second)); err != nil {
+	if err := e.Deliver(context.Background(), now.Add(29*time.Second)); err != nil {
 		t.Fatal(err)
 	}
 	if calls != 1 {
@@ -223,13 +223,13 @@ func TestRelayBatchesNewEventsAndReceiptsAndHonorsDailyRetryAfter(t *testing.T) 
 	// More than a batch worth of each kind; neither kind can starve the other.
 	e.Store.DB.Exec("UPDATE outbox SET submitted=1 WHERE rowid<=17")
 	calls := 0
-	e.Relay = &http.Client{Transport: transportFunc(func(r *http.Request) (*http.Response, error) {
+	e.Relay = &http.Client{Transport: detailedTransport(func(r *http.Request) (*http.Response, error) {
 		calls++
 		var batch syncRequest
 		if err := json.NewDecoder(r.Body).Decode(&batch); err != nil {
 			t.Fatal(err)
 		}
-		if len(batch.Events) != 4 || len(batch.Receipts) != 16 {
+		if len(batch.Events) != 4 || len(batch.Receipts) != 17 {
 			t.Fatalf("wrong batch sizes: %+v", batch)
 		}
 		res := response(429, `{"error":"device_daily_budget"}`)
@@ -241,7 +241,7 @@ func TestRelayBatchesNewEventsAndReceiptsAndHonorsDailyRetryAfter(t *testing.T) 
 	}
 	// The remaining queued item must not sneak through during the account-wide wait.
 	e = NewEngine(e.Store)
-	e.Relay = &http.Client{Transport: transportFunc(func(*http.Request) (*http.Response, error) { t.Fatal("daily wait bypassed"); return nil, nil })}
+	e.Relay = &http.Client{Transport: detailedTransport(func(*http.Request) (*http.Response, error) { t.Fatal("daily wait bypassed"); return nil, nil })}
 	if err := e.Deliver(context.Background(), now.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +255,7 @@ func TestRelayBatchesNewEventsAndReceiptsAndHonorsDailyRetryAfter(t *testing.T) 
 func TestRelayReceiptLongBackoffDoesNotDelayFreshEvents(t *testing.T) {
 	e, now := relayFixture(t)
 	calls := 0
-	e.Relay = &http.Client{Transport: transportFunc(func(r *http.Request) (*http.Response, error) {
+	e.Relay = &http.Client{Transport: detailedTransport(func(r *http.Request) (*http.Response, error) {
 		calls++
 		var batch syncRequest
 		json.NewDecoder(r.Body).Decode(&batch)
@@ -279,6 +279,7 @@ func TestRelayReceiptLongBackoffDoesNotDelayFreshEvents(t *testing.T) {
 
 func TestRelayPacksEscapedEventsWithinWireLimit(t *testing.T) {
 	e, now := relayFixture(t)
+	_, recipient, _, _ := bodyFixture(t)
 	st, _ := e.Store.State()
 	for id := int64(3); id <= 5; id++ {
 		e.Store.ImportPage(st, []Notification{notification(id)}, true)
@@ -297,19 +298,29 @@ func TestRelayPacksEscapedEventsWithinWireLimit(t *testing.T) {
 	}
 	rows.Close()
 	for _, ev := range events {
+		ev.DetailsVersion = 1
 		ev.Title = strings.Repeat("&", 220)
-		ev.Body = strings.Repeat("&", 500)
+		ev.Body = strings.Repeat("👋", 500)
 		raw, _ := json.Marshal(ev)
 		e.Store.DB.Exec("UPDATE outbox SET payload=? WHERE event_id=?", string(raw), ev.EventID)
 	}
+	sent := 0
 	e.Relay = &http.Client{Transport: transportFunc(func(r *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(r.URL.Path, "/health") {
+			return response(200, `{"notification_body_encryption":2,"notification_routing":1,"notification_details":1,"notification_test_samples":1,"max_events":20,"max_receipts":50,"max_sync_bytes":4096}`), nil
+		}
+		if strings.HasSuffix(r.URL.Path, "/recipient-keys") {
+			raw, _ := json.Marshal(map[string]any{"source_account_id": 7, "recipients": []bodyRecipient{recipient}})
+			return response(200, string(raw)), nil
+		}
 		raw, _ := io.ReadAll(r.Body)
-		if len(raw) > 16<<10 {
+		if len(raw) > 4096 {
 			t.Fatal("oversized batch")
 		}
 		var batch syncRequest
 		json.Unmarshal(raw, &batch)
-		if len(batch.Events) != 3 {
+		sent = len(batch.Events)
+		if sent < 1 || sent >= len(events) {
 			t.Fatal("overflow was not retained", len(batch.Events))
 		}
 		return nil, errors.New("synthetic network failure")
@@ -319,7 +330,7 @@ func TestRelayPacksEscapedEventsWithinWireLimit(t *testing.T) {
 	}
 	var untouched int
 	e.Store.DB.QueryRow("SELECT COUNT(*) FROM outbox WHERE attempts=0").Scan(&untouched)
-	if untouched != 1 {
+	if untouched != len(events)-sent {
 		t.Fatal("overflow event was consumed")
 	}
 }

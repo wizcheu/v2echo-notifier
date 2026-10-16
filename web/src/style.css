@@ -1039,3 +1039,6 @@ a.button.primary:hover { filter:brightness(.95); }
 .browser-verification pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .browser-verification summary { cursor: pointer; }
 .browser-verification-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+
+.test-kind { display:flex; flex-direction:column; gap:8px; max-width:320px; margin-bottom:24px; }
+.push-avatar { width:48px; height:48px; border-radius:12px; object-fit:cover; float:right; margin:0 0 12px 16px; }

@@ -14,6 +14,8 @@ export type PushHistoryItem = {
   attempts: number
   next_attempt: number
   detail: string
+  test_kind?: string
+  avatar_url?: string
   notification_id: number
   title: string
   body: string
@@ -220,7 +222,7 @@ useEffect(() => {window.scrollTo(0, 0); document.title = `${location.event ? '�
                           {summary
                             ? `${initial ? '首次配对时有' : '网页显示有'} ${item.unread_count} 条未读提醒`
                             : test
-                              ? `${username ? `@${username} · ` : ''}V2Echo 测试推送`
+                              ? item.test_kind ? item.title : `${username ? `@${username} · ` : ''}V2Echo 测试推送`
                               : item.title || '新通知'}
                         </strong>
                         <small>

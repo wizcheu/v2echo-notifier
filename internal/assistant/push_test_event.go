@@ -15,12 +15,13 @@ var pushTestID = regexp.MustCompile(`^[0-9a-f]{64}$`)
 const pushTestLifetime = 15 * time.Minute
 
 type PushTestState struct {
+	Samples     []PushTestSample     `json:"samples"`
 	NextAllowed int64                `json:"next_allowed"`
 	Latest      *DeliveryHistoryItem `json:"latest"`
 }
 
 func (s *Store) PushTestState() (PushTestState, error) {
-	var state PushTestState
+	state := PushTestState{Samples: pushTestSamples()}
 	var eventID string
 	if err := s.DB.QueryRow("SELECT next_allowed,event_id FROM push_test_schedule WHERE id=1").Scan(&state.NextAllowed, &eventID); err != nil {
 		return state, err
@@ -45,7 +46,15 @@ func (e *pushTestError) Error() string { return e.message }
 
 // A browser-generated ID survives uncertain HTTP responses. Replaying it only
 // returns the existing event; it cannot reset the relay schedule or resend APNs.
-func (e *Engine) QueuePushTest(eventID string, now time.Time) error {
+func (e *Engine) QueuePushTest(eventID string, now time.Time, kinds ...string) error {
+	kind := ""
+	if len(kinds) > 0 {
+		kind = kinds[0]
+	}
+	sample, valid := pushTestSample(kind)
+	if kind != "" && !valid {
+		return &pushTestError{status: 400, message: "请选择有效的通知测试类型"}
+	}
 	entered := time.Now()
 	e.relayMu.Lock()
 	defer e.relayMu.Unlock()
@@ -61,7 +70,7 @@ func (e *Engine) QueuePushTest(eventID string, now time.Time) error {
 	err := e.Store.DB.QueryRow("SELECT payload FROM outbox WHERE event_id=?", eventID).Scan(&existing)
 	if err == nil {
 		var event Event
-		if json.Unmarshal([]byte(existing), &event) != nil || event.Type != "test" {
+		if json.Unmarshal([]byte(existing), &event) != nil || event.Type != "test" || event.TestKind != kind {
 			return &pushTestError{status: 409, message: "请求编号已被其他事件使用"}
 		}
 		return nil
@@ -99,13 +108,16 @@ func (e *Engine) QueuePushTest(eventID string, now time.Time) error {
 		return err
 	}
 	if test.NextAllowed > now.Unix() {
-		return &pushTestError{status: 429, message: "测试请求过于频繁，请等待三分钟冷却结束", retryAfter: int(test.NextAllowed - now.Unix())}
+		return &pushTestError{status: 429, message: "测试请求过于频繁，请等待 30 秒冷却结束", retryAfter: int(test.NextAllowed - now.Unix())}
 	}
 	if test.Latest != nil && test.Latest.Status == "pending" && test.Latest.CreatedAt.Add(pushTestLifetime).After(now) {
 		return &pushTestError{status: 409, message: "上一条测试仍在处理中，请等待回执或测试过期"}
 	}
 	event := Event{EventID: eventID, Type: "test", SourceAccountID: st.AccountID,
 		Title: "@" + st.Username, Body: PushTestBody, CreatedAt: now.UTC(), ExpiresAt: now.UTC().Add(pushTestLifetime)}
+	if kind != "" {
+		event.TestKind, event.Title, event.Body, event.AvatarURL = kind, sample.Title, sample.Body, sample.AvatarURL
+	}
 	raw, err := json.Marshal(event)
 	if err != nil {
 		return err
@@ -127,14 +139,14 @@ func (e *Engine) QueuePushTest(eventID string, now time.Time) error {
 func (s *Server) queuePushTest(e *Engine, w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		EventID string `json:"event_id"`
+		Kind    string `json:"test_kind"`
 	}
 	if err := decode(w, r, &input); err != nil {
 		fail(w, 400, "测试请求格式不正确")
 		return
 	}
-	if err := e.QueuePushTest(input.EventID, time.Now()); err != nil {
-		var problem *pushTestError
-		if errors.As(err, &problem) {
+	if err := e.QueuePushTest(input.EventID, time.Now(), input.Kind); err != nil {
+		if problem, ok := errors.AsType[*pushTestError](err); ok {
 			if problem.retryAfter > 0 {
 				w.Header().Set("Retry-After", strconv.Itoa(problem.retryAfter))
 			}

@@ -12,9 +12,9 @@ import (
 	"time"
 )
 
-const relayInterval = 180 * time.Second
-const relayBatchEvents = 4
-const relayBatchReceipts = 16
+const relayInterval = 30 * time.Second
+const relayBatchEvents = 20
+const relayBatchReceipts = 50
 
 // Acceptance by APNs is not proof of delivery to the device.
 type Receipt struct {
@@ -66,12 +66,41 @@ func (e *Engine) Deliver(ctx context.Context, now time.Time) error {
 	if blocked || next > now.Unix() {
 		return nil
 	}
+	// Expiry must also advance when an older server cannot accept details yet.
+	if _, err = e.Store.DB.Exec(`UPDATE outbox SET status='expired',detail='已超过通知有效期'
+      WHERE status='pending' AND julianday(json_extract(payload,'$.expires_at'))<=julianday(?)`, now.UTC().Format(time.RFC3339Nano)); err != nil {
+		return err
+	}
+	// Summaries and receipt lookups retain their original protocol. Body-bearing
+	// events require encryption support before any submission, including events
+	// queued before upgrade. An older service never triggers plaintext fallback.
+	var enhanced bool
+	if err = e.Store.DB.QueryRow(`SELECT EXISTS(SELECT 1 FROM outbox WHERE status='pending' AND submitted=0 AND next_attempt<=?
+      AND (json_extract(payload,'$.type')='notification' OR json_extract(payload,'$.test_kind') IS NOT NULL)
+      AND (json_extract(payload,'$.type')='test' OR ?))`, now.Unix(), windowStart.IsZero() || !st.LastSuccess.Before(windowStart)).Scan(&enhanced); err != nil {
+		return err
+	}
+	eventLimit, receiptLimit, byteLimit := 4, 16, 16<<10
+	if enhanced {
+		caps, err := e.notificationCapabilities(ctx, cfg.RelayURL)
+		if err != nil {
+			_, saveErr := e.Store.DB.Exec(`UPDATE relay_schedule SET next_sync=? WHERE id=1`, notificationRetryAt(err, now))
+			if saveErr != nil {
+				return saveErr
+			}
+			_, saveErr = e.Store.DB.Exec(`UPDATE outbox SET detail=? WHERE status='pending' AND submitted=0
+              AND (json_extract(payload,'$.type')='notification' OR json_extract(payload,'$.test_kind') IS NOT NULL)`, err.Error())
+			return saveErr
+		}
+		eventLimit, receiptLimit, byteLimit = min(relayBatchEvents, caps.MaxEvents), min(relayBatchReceipts, caps.MaxReceipts), min(64<<10, caps.MaxBytes)
+	}
+	var recipients []bodyRecipient
 	deliveries := []Delivery{}
 	// Separate limits prevent pending receipts from starving new notifications.
 	for _, submitted := range []bool{false, true} {
-		limit := relayBatchEvents
+		limit := eventLimit
 		if submitted {
-			limit = relayBatchReceipts
+			limit = receiptLimit
 		}
 		rows, err := e.Store.DB.Query(`SELECT event_id,status,submitted,attempts,next_attempt,detail,payload FROM outbox
     WHERE status='pending' AND submitted=? AND next_attempt<=? ORDER BY priority DESC,rowid LIMIT ?`, submitted, now.Unix(), limit)
@@ -116,7 +145,24 @@ func (e *Engine) Deliver(ctx context.Context, now time.Time) error {
 			batch.Receipts = append(batch.Receipts, d.EventID)
 		} else {
 			payload := json.RawMessage(d.Payload)
-			if ev.Type == "unread_summary" {
+			if encryptedBodyEvent(ev) {
+				payload, err = e.encryptedWire(ctx, cfg, ev, d.Attempts, &recipients)
+				if errors.Is(err, errPreEncryptionAttempt) {
+					d.Status, d.Detail = "skipped", "升级前已尝试发送的旧事件不再上传明文；请在应用内查看"
+					if err = e.Store.SaveDelivery(d); err != nil {
+						return err
+					}
+					continue
+				}
+				if err != nil {
+					if errors.Is(err, ErrPairingRequired) {
+						d.Status, d.Detail = "blocked", "推送凭据无效或已撤销，请重新配对"
+						return e.Store.saveRelayRound([]Delivery{d}, now.Add(3*time.Minute).Unix(), failures)
+					}
+					d.Detail = "无法安全准备通知密文（服务不可用或设备密钥变化），保留原事件；请检查连接或重新注册接收设备"
+					return e.Store.saveRelayRound([]Delivery{d}, notificationRetryAt(err, now), failures)
+				}
+			} else if ev.Type == "unread_summary" {
 				payload, err = json.Marshal(struct {
 					EventID         string    `json:"event_id"`
 					Type            string    `json:"type"`
@@ -136,7 +182,8 @@ func (e *Engine) Deliver(ctx context.Context, now time.Time) error {
 					SourceAccountID int64     `json:"source_account_id"`
 					CreatedAt       time.Time `json:"created_at"`
 					ExpiresAt       time.Time `json:"expires_at"`
-				}{ev.EventID, ev.Type, ev.SourceAccountID, ev.CreatedAt, ev.ExpiresAt})
+					TestKind        string    `json:"test_kind,omitempty"`
+				}{ev.EventID, ev.Type, ev.SourceAccountID, ev.CreatedAt, ev.ExpiresAt, ev.TestKind})
 				if err != nil {
 					return err
 				}
@@ -153,9 +200,9 @@ func (e *Engine) Deliver(ctx context.Context, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	// JSON escaping can make four otherwise valid events exceed the wire limit.
+	// JSON escaping can make otherwise valid events exceed the wire limit.
 	// Leave overflow events untouched in the queue for a later round.
-	for len(raw) > 16<<10 {
+	for len(raw) > byteLimit {
 		if len(batch.Events) == 0 {
 			return fmt.Errorf("批量请求超过大小限制")
 		}
@@ -175,6 +222,12 @@ func (e *Engine) Deliver(ctx context.Context, now time.Time) error {
 		if err != nil {
 			return err
 		}
+	}
+	if len(active) == 0 {
+		// A server advertising a smaller capacity may not fit even one immutable
+		// encrypted event. Keep it queued without sending an invalid empty batch.
+		_, err = e.Store.DB.Exec("UPDATE relay_schedule SET next_sync=? WHERE id=1", now.Add(3*time.Minute).Unix())
+		return err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.RelayURL+"/v1/sync", strings.NewReader(string(raw)))
 	if err != nil {
@@ -205,10 +258,11 @@ func (e *Engine) Deliver(ctx context.Context, now time.Time) error {
 	valid := false
 	if resp.StatusCode == 200 {
 		var result syncResponse
-		responseBody, readErr := io.ReadAll(io.LimitReader(resp.Body, (64<<10)+1))
+		// A shared connection can return 10 device results per event/receipt.
+		responseBody, readErr := io.ReadAll(io.LimitReader(resp.Body, (256<<10)+1))
 		err = readErr
 		if err == nil {
-			if len(responseBody) > 64<<10 {
+			if len(responseBody) > 256<<10 {
 				err = fmt.Errorf("回执超过大小限制")
 			} else {
 				err = json.Unmarshal(responseBody, &result)
@@ -272,6 +326,8 @@ func (e *Engine) Deliver(ctx context.Context, now time.Time) error {
 				d.Detail = "推送凭据无效或已撤销，请重新配对"
 			case resp.StatusCode == 429 || resp.StatusCode >= 500:
 				d.Detail = fmt.Sprintf("推送服务暂不可用或额度受限（HTTP %d），等待下一轮", resp.StatusCode)
+			case enhanced && (resp.StatusCode == 400 || resp.StatusCode == 404 || resp.StatusCode == 413):
+				d.Detail = "推送服务尚不支持本批详细通知，请先升级推送服务；原事件保留等待重试"
 			case resp.StatusCode >= 400 && resp.StatusCode < 500:
 				d.Status = "rejected"
 				d.Detail = fmt.Sprintf("推送服务拒绝本批事件（HTTP %d）", resp.StatusCode)

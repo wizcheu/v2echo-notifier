@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 )
@@ -29,7 +30,7 @@ func hybridFixture(t *testing.T) (*Engine, *int, *int64, *int) {
 		if r.URL.Query().Get("p") != "1" || r.Header.Get("Cookie") != "" {
 			t.Fatal("invalid API request")
 		}
-		return pageResponse([]int64{first, first - 1, first - 2}, 100, 3), nil
+		return pageResponse([]int64{first, first - 1, first - 2}, 3, 3), nil
 	})
 	return e, &count, &first, &calls
 }
@@ -43,17 +44,15 @@ func hybridStep(t *testing.T, e *Engine) {
 	}
 }
 
-func TestHybridFirstIDDedupCountAndRestart(t *testing.T) {
+func TestHybridNotificationIDDedupCountAndRestart(t *testing.T) {
 	e, count, first, calls := hybridFixture(t)
 	for _, round := range []struct {
 		count       int
 		first       int64
 		events, api int
 	}{
-		{3, 30, 1, 1}, {3, 30, 1, 2}, {4, 30, 1, 3}, // Count changes alone never trigger.
-		{4, 31, 2, 4}, {4, 29, 3, 5}, // Deleting the first ID also triggers.
-		{0, 32, 3, 5}, {4, 29, 3, 6}, // Zero skips API and preserves the baseline.
-		{4, 31, 4, 7}, // Returning to a previously seen ID is a new transition.
+		{3, 30, 3, 1}, {3, 30, 3, 2}, {3, 31, 4, 3}, {2, 30, 4, 4},
+		{0, 32, 4, 4}, {2, 30, 4, 5}, {3, 31, 4, 6},
 	} {
 		*count, *first = round.count, round.first
 		hybridStep(t, e)
@@ -62,9 +61,8 @@ func TestHybridFirstIDDedupCountAndRestart(t *testing.T) {
 		}
 		st := stateOf(t, e.Store)
 		if !st.HasWebUnread || st.WebUnreadCount != round.count {
-			t.Fatal("missing webpage snapshot")
+			t.Fatal("missing website snapshot")
 		}
-		// A new engine must recover the comparison baseline from SQLite.
 		next := NewEngine(e.Store)
 		next.Web = e.Web
 		next.API = e.API
@@ -75,11 +73,8 @@ func TestHybridFirstIDDedupCountAndRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	var event Event
-	if err := json.Unmarshal([]byte(raw), &event); err != nil || event.Type != "unread_summary" || event.UnreadCount != 4 || event.NotificationID != 31 {
+	if err := json.Unmarshal([]byte(raw), &event); err != nil || event.Type != "notification" || event.DetailsVersion != 1 || event.NotificationID != 31 {
 		t.Fatal(event, err)
-	}
-	if queryInt(t, e.Store, "SELECT COUNT(*) FROM outbox WHERE status='pending'") != 1 {
-		t.Fatal("stale unsent summaries were not superseded")
 	}
 }
 
@@ -124,8 +119,8 @@ func TestHybridFailureAndAtomicBaseline(t *testing.T) {
 				e.Web.Transport = transportFunc(func(*http.Request) (*http.Response, error) { return response(200, webPage("tester", 3)), nil })
 			}
 			hybridStep(t, e)
-			if !stateOf(t, e.Store).HasPushAPIID || queryInt(t, e.Store, "SELECT COUNT(*) FROM outbox") != 1 {
-				t.Fatal("recovery lost summary")
+			if !stateOf(t, e.Store).HasPushAPIID || queryInt(t, e.Store, "SELECT COUNT(*) FROM outbox") != 3 {
+				t.Fatal("recovery lost individual notifications")
 			}
 		})
 	}
@@ -193,47 +188,68 @@ func TestHybridSharedQuotaDoesNotBlockHomepageBehindLegacyAccount(t *testing.T) 
 	}
 }
 
-func TestHybridSummaryWireAndSubmittedReceiptSurviveZeroUnread(t *testing.T) {
+func notificationCapabilitiesResponse() *http.Response {
+	return response(200, `{"notification_body_encryption":2,"notification_routing":1,"notification_details":1,"notification_test_samples":1,"max_events":20,"max_receipts":50,"max_sync_bytes":65536}`)
+}
+func detailedTransport(next transportFunc) transportFunc {
+	return func(r *http.Request) (*http.Response, error) {
+		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/v1/recipient-keys") {
+			return response(200, `{"source_account_id":7,"recipients":[]}`), nil
+		}
+		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/v1/health") {
+			return notificationCapabilitiesResponse(), nil
+		}
+		return next(r)
+	}
+}
+
+func TestHybridDetailedWireAndSubmittedReceiptSurviveZeroUnread(t *testing.T) {
 	e, count, _, _ := hybridFixture(t)
 	hybridStep(t, e)
 	calls := 0
-	e.Relay.Transport = transportFunc(func(r *http.Request) (*http.Response, error) {
+	e.Relay.Transport = detailedTransport(func(r *http.Request) (*http.Response, error) {
 		calls++
-		var batch struct {
-			Events   []map[string]any `json:"events"`
-			Receipts []string         `json:"receipts"`
-		}
+		var batch syncRequest
 		if err := json.NewDecoder(r.Body).Decode(&batch); err != nil {
 			t.Fatal(err)
 		}
-		var id string
+		receipts := []Receipt{}
 		if calls == 1 {
-			if len(batch.Events) != 1 || len(batch.Events[0]) != 6 || batch.Events[0]["unread_count"] != float64(3) {
-				t.Fatal("unexpected summary wire", batch)
+			if len(batch.Events) != 3 {
+				t.Fatal("expected three individual events", batch)
 			}
-			id = batch.Events[0]["event_id"].(string)
+			for _, raw := range batch.Events {
+				var event Event
+				json.Unmarshal(raw, &event)
+				if event.DetailsVersion != 3 || event.Type != "notification" || event.UnreadCount != 3 {
+					t.Fatal(event)
+				}
+				receipts = append(receipts, Receipt{EventID: event.EventID, Status: "pending", RetryAfterSeconds: 30})
+			}
 		} else {
-			if len(batch.Events) != 0 || len(batch.Receipts) != 1 {
-				t.Fatal("submitted summary must only query receipt")
+			if len(batch.Events) != 0 || len(batch.Receipts) != 3 {
+				t.Fatal("submitted events must only query receipts")
 			}
-			id = batch.Receipts[0]
+			for _, id := range batch.Receipts {
+				receipts = append(receipts, Receipt{EventID: id, Status: "apns_accepted"})
+			}
 		}
 		if r.Header.Get("Cookie") != "" {
 			t.Fatal("cookie leaked")
 		}
-		raw, _ := json.Marshal(syncResponse{RetryAfterSeconds: 180, Receipts: []Receipt{{EventID: id, Status: "pending", RetryAfterSeconds: 180}}})
+		raw, _ := json.Marshal(syncResponse{RetryAfterSeconds: 30, Receipts: receipts})
 		return response(200, string(raw)), nil
 	})
 	now := time.Now()
-	if err := e.Deliver(context.Background(), now); err != nil {
+	if err := e.Deliver(t.Context(), now); err != nil {
 		t.Fatal(err)
 	}
 	*count = 0
 	hybridStep(t, e)
-	if queryInt(t, e.Store, "SELECT COUNT(*) FROM outbox WHERE status='pending' AND submitted=1") != 1 {
-		t.Fatal("zero discarded pending receipt")
+	if queryInt(t, e.Store, "SELECT COUNT(*) FROM outbox WHERE status='pending' AND submitted=1") != 3 {
+		t.Fatal("zero discarded pending receipts")
 	}
-	if err := e.Deliver(context.Background(), now.Add(4*time.Minute)); err != nil {
+	if err := e.Deliver(t.Context(), now.Add(4*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	if calls != 2 {
@@ -241,7 +257,7 @@ func TestHybridSummaryWireAndSubmittedReceiptSurviveZeroUnread(t *testing.T) {
 	}
 }
 
-func TestHybridEnablingCookieRetiresOnlyUnattemptedLegacyEvents(t *testing.T) {
+func TestHybridEnablingCookiePreservesImmutableEventsUntilUnreadRecheck(t *testing.T) {
 	s := testStore(t)
 	seed(t, s, State{Verified: true, AccountID: 7, Username: "tester"})
 	if err := s.ImportPage(stateOf(t, s), []Notification{notification(30), notification(29)}, true); err != nil {
@@ -258,7 +274,7 @@ func TestHybridEnablingCookieRetiresOnlyUnattemptedLegacyEvents(t *testing.T) {
 	if err := NewEngine(s).Configure(cfg); err != nil {
 		t.Fatal(err)
 	}
-	if queryInt(t, s, "SELECT COUNT(*) FROM outbox WHERE status='skipped' AND attempts=0") != 1 || queryInt(t, s, "SELECT COUNT(*) FROM outbox WHERE status='pending' AND attempts=1") != 1 {
-		t.Fatal("migration changed an uncertain send or retained an unattempted legacy event")
+	if queryInt(t, s, "SELECT COUNT(*) FROM outbox WHERE status='pending' AND attempts=0") != 1 || queryInt(t, s, "SELECT COUNT(*) FROM outbox WHERE status='pending' AND attempts=1") != 1 {
+		t.Fatal("configuration save changed existing event delivery")
 	}
 }

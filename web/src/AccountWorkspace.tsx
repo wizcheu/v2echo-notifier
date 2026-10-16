@@ -119,6 +119,7 @@ export default function AccountWorkspace({
   const [pairCode, setPairCode] = useState('')
   const [pairCookie, setPairCookie] = useState('')
   const testRequestID = useRef('')
+  const testRequestKind = useRef('')
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   useEffect(() => { setMessage(''); setError('') }, [tab])
@@ -424,12 +425,12 @@ export default function AccountWorkspace({
           <label>配对码<input value={pairCode} onChange={e => setPairCode(e.target.value)} disabled={busy} maxLength={28} autoComplete="off" placeholder="输入 V2E-…" /></label>
           {!config.cookie_configured && <SecretField label="同账号的 Cookie" value={pairCookie} onChange={setPairCookie} maxLength={16384} disabled={busy} />}
           <div className="onboarding-actions"><button className="primary" disabled={busy || !pairCode || (!config.cookie_configured && !pairCookie)} onClick={pair}>{busy ? '正在配对…' : '配对设备'}</button><a className="text-link" href={href('settings')}>稍后配对</a></div>
-        </section><section className="onboarding-help"><h2>首次配对</h2><p>使用已保存的 Cookie 校验账号并读取首页未读数，Cookie 不发送给推送服务。</p><p>有初始未读时，确认 API 首条 ID 后发送一条汇总提醒，结果可在推送历史查看。</p><p>启用同步后，历史通知会分批导入；初次导入的历史通知不会逐条推送。</p></section>
+        </section><section className="onboarding-help"><h2>首次配对</h2><p>使用已保存的 Cookie 校验账号并读取首页未读数，Cookie 不发送给推送服务。</p><p>有初始未读时，分页核对后逐条提醒，结果可在推送历史查看。</p><p>只对当前未读范围创建提醒，同一通知不会重复入队；范围外的历史不补发。</p></section>
       </div>}
       {recovery && <div className="recovery-page content-surface">
         <div className="notice error" role="alert"><Icon name="lock" /><div><strong>{state.cookie_issue ? 'Cookie 已失效' : 'API Token 需要更新'}</strong><p>{state.cookie_issue || state.token_issue || '请重新验证当前账号。'}</p></div></div>
         <div className="account-actions"><button className="primary" onClick={() => setTab('credentials')}>更新{state.cookie_issue ? ' Cookie' : ' Token'}</button><a className="text-link" href="#/accounts">查看账号状态</a></div>
-        <section><span className="muted">{state.has_web_unread ? '上次网页未读快照' : '当前网页未读快照'}</span><h2>{state.has_web_unread ? `${state.web_unread_count} 条` : '暂时无法获取'}</h2><p className="muted">{state.has_web_unread ? `观察于 ${time(state.web_observed_at)}，更新凭据后重新检查。` : '缺失计数不会当作 0。本轮汇总已暂停，历史记录仍可查看。'}</p></section>
+        <section><span className="muted">{state.has_web_unread ? '上次网页未读快照' : '当前网页未读快照'}</span><h2>{state.has_web_unread ? `${state.web_unread_count} 条` : '暂时无法获取'}</h2><p className="muted">{state.has_web_unread ? `观察于 ${time(state.web_observed_at)}，更新凭据后重新检查。` : '缺失计数不会当作 0。本轮提醒已暂停，历史记录仍可查看。'}</p></section>
         <dl className="details"><div><dt>最近成功检查</dt><dd>{time(state.last_success)}</dd></div><div><dt>下一步</dt><dd>更新凭据 → 等待验证 → 恢复检查</dd></div></dl>
         <a className="text-link" href={href('history')}>查看历史记录</a><p className="caption">网络故障或访问挑战会显示连接错误与重试入口，不会直接判定凭据过期。</p>
       </div>}
@@ -524,7 +525,7 @@ export default function AccountWorkspace({
                   ? '完成配对并启用后开始上报。'
                   : snapshot.relay_next_sync * 1000 > Date.now()
                       ? `下次允许通信 ${time(snapshot.relay_next_sync)}`
-                      : '有待处理事件时上报，至少 3 分钟一轮。'}
+                      : '有待处理事件时上报，至少 30 秒一轮。'}
               </p>
             </div>
             <div className="account-actions">
@@ -635,7 +636,7 @@ export default function AccountWorkspace({
               </div>
               <div>
                 <dt>上报间隔</dt>
-                <dd>至少 3 分钟一轮 · 无待处理事项时不通信</dd>
+                <dd>至少 30 秒一轮 · 无待处理事项时不通信</dd>
               </div>
             </dl>
             <p className="caption">{relayReady ? '推送服务已配置。' : '推送服务尚未配置。'}APNs 已接收不代表设备已送达；初次导入的历史通知不会推送。</p>
@@ -703,7 +704,7 @@ export default function AccountWorkspace({
             <h2>凭据如何使用</h2>
             <p className="muted">
               Token 用于访问官方 API。Cookie
-              用于读取首页未读数，不执行已读操作，也不发送给推送服务。网页读取失败时暂停本轮汇总。
+              用于读取首页未读数，不执行已读操作，也不发送给推送服务。网页读取失败时暂停本轮提醒。
             </p>
             <p className="caption">
               凭据失效会在概览与账号管理中提示。网络故障或访问挑战不会直接判定为过期。未配置 Cookie
@@ -735,7 +736,7 @@ export default function AccountWorkspace({
                 </span>
               </div>
             </div>
-            <p className="caption"><span className="desktop-title">首次配对时有 {state.initial_unread_count} 条未读。重新配对会保留上次推送的 API 首条消息 ID。</span><span className="mobile-title">首次配对时有 {state.initial_unread_count} 条未读，汇总提醒的结果可在推送历史查看。</span></p>
+            <p className="caption"><span className="desktop-title">首次配对时有 {state.initial_unread_count} 条未读。重新配对会保留已有通知的去重记录。</span><span className="mobile-title">首次配对时有 {state.initial_unread_count} 条未读，逐条提醒的结果可在推送历史查看。</span></p>
             <a className="button primary" href={href('pushTest')}>
               发送测试推送
             </a>
@@ -787,7 +788,7 @@ export default function AccountWorkspace({
               />
             )}
             <p className="caption">
-              {state.initial_pairing_done ? '重新配对将停止旧连接的待处理事件。' : '首次配对会校验同账号的 Cookie 并读取首页未读数；有未读时，确认 API 首条 ID 后发送一条汇总提醒。Cookie 加密保存在此服务器，不发送给推送服务。'}
+              {state.initial_pairing_done ? '重新配对将停止旧连接的待处理事件。' : '首次配对会校验同账号的 Cookie 并读取首页未读数；有未读时，分页核对并按通知 ID 去重后逐条提醒。Cookie 加密保存在此服务器，不发送给推送服务。'}
             </p>
             {(!state.verified || state.auth_blocked) && (
               <p className="notice">请先在「账号凭据」中保存有效的 V2EX Token，账号验证通过后即可配对。</p>
@@ -802,7 +803,7 @@ export default function AccountWorkspace({
           <SecretField label="网页 Cookie" value={draft.cookie} maxLength={16384} disabled={busy || configLoading} placeholder="A2=…; 其他 Cookie…" onChange={value => setDraft({...draft,cookie:value})} /><p className="caption">最近验证 {time(state.cookie_checked_at)} · {state.cookie_issue ? '需要更新' : config.cookie_configured ? '已配置' : '尚未配置'}</p></section>
           <div className="notice credential-notice"><Icon name="check_circle" /><div><div className="desktop-title"><strong>使用同一个 V2EX 账号</strong><p>Token 与 Cookie 的用户名必须完全一致。不能用其他账号的 Token 覆盖当前配置。</p></div><span className="mobile-title">两项必须属于同一个账号。<br />留空保留原值，更新后重新验证。</span></div></div>
           <div className="save-bar"><p className="caption">留空保留原值；更新后重新验证。</p><a className="button" href={href('settings')}>取消</a><button className="primary" disabled={busy || configLoading}>{busy ? '正在保存…' : <><span className="desktop-title">保存账号凭据</span><span className="mobile-title">保存凭据</span></>}</button></div>
-          <section className="credential-help"><h2>获取凭据</h2><div className="desktop-title"><TokenHelp /><p className="caption">Cookie：复制已登录浏览器的完整 Cookie 请求头，需包含 A2。</p></div><div className="mobile-title"><p className="caption">Token 选择 Everything 权限，建议有效期 180 天。Cookie 需包含 A2。</p><a className="text-link credential-help-link" href="https://v2ex.com/settings/tokens" target="_blank" rel="noopener noreferrer">前往 V2EX 生成 Token ↗</a></div><details className="technical-details"><summary>凭据检查与隐私说明</summary><p className="caption">Token 用于访问官方 API；Cookie 仅用于读取首页未读数，不执行已读操作，也不发送给推送服务。读取失败时暂停本轮汇总，缺失计数不会当作 0。没有通知 API 请求时，每 24 小时额外检查一次 Token。</p></details></section>
+          <section className="credential-help"><h2>获取凭据</h2><div className="desktop-title"><TokenHelp /><p className="caption">Cookie：复制已登录浏览器的完整 Cookie 请求头，需包含 A2。</p></div><div className="mobile-title"><p className="caption">Token 选择 Everything 权限，建议有效期 180 天。Cookie 需包含 A2。</p><a className="text-link credential-help-link" href="https://v2ex.com/settings/tokens" target="_blank" rel="noopener noreferrer">前往 V2EX 生成 Token ↗</a></div><details className="technical-details"><summary>凭据检查与隐私说明</summary><p className="caption">Token 用于访问官方 API；Cookie 仅用于读取首页未读数，不执行已读操作，也不发送给推送服务。读取失败时暂停本轮提醒，缺失计数不会当作 0。没有通知 API 请求时，每 24 小时额外检查一次 Token。</p></details></section>
         </form>
       )}
       {tab === 'sync' && configLoaded && (
@@ -994,13 +995,15 @@ export default function AccountWorkspace({
             )
           }
           onHistory={() => setTab('pushHistory')}
-          onSend={() =>
+          onSend={(kind) =>
             void action(async () => {
+              if (testRequestKind.current !== kind) testRequestID.current = ''
+              testRequestKind.current = kind
               if (!testRequestID.current)
                 testRequestID.current = Array.from(crypto.getRandomValues(new Uint8Array(32)), (byte) =>
                   byte.toString(16).padStart(2, '0'),
                 ).join('')
-              await api(accountPath('push-test'), 'POST', { event_id: testRequestID.current })
+              await api(accountPath('push-test'), 'POST', { event_id: testRequestID.current, test_kind: kind })
               testRequestID.current = ''
               await refresh(true)
               setMessage('测试请求已保存，请查看下方处理结果，并在 App 端确认是否收到消息。')

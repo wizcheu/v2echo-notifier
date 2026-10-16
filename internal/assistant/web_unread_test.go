@@ -152,7 +152,7 @@ func TestFirstPairingEncryptsCookieAndDefersSummaryUntilAPICheck(t *testing.T) {
 	}
 	defer s.DB.Close()
 	st := State{AccountID: 7, Username: "tester", Verified: true}
-	if err = s.SaveConfig(Config{Enabled: true, APIToken: "private-pat", IntervalSeconds: 180}, st, false); err != nil {
+	if err = s.SaveConfig(Config{Enabled: true, APIToken: "private-pat", IntervalSeconds: 180, PushSchedule: allDaySchedule()}, st, false); err != nil {
 		t.Fatal(err)
 	}
 	e := NewEngine(s)
@@ -199,14 +199,14 @@ func TestFirstPairingEncryptsCookieAndDefersSummaryUntilAPICheck(t *testing.T) {
 		t.Fatal(err)
 	}
 	var event Event
-	if err = json.Unmarshal([]byte(payload), &event); err != nil || event.Type != "unread_summary" || event.UnreadCount != 3 || event.NotificationID != 30 {
+	if err = json.Unmarshal([]byte(payload), &event); err != nil || event.Type != "notification" || event.DetailsVersion != 1 || event.UnreadCount != 3 || event.NotificationID != 28 {
 		t.Fatal(event, err)
 	}
 
 	if err = e.Pair(context.Background(), PushServiceURL, code, ""); err != nil {
 		t.Fatal(err)
 	}
-	if cookieReads != 2 || queryInt(t, s, "SELECT COUNT(*) FROM outbox") != 1 {
+	if cookieReads != 2 || queryInt(t, s, "SELECT COUNT(*) FROM outbox") != 3 {
 		t.Fatal("pair retry repeated bootstrap")
 	}
 	s.DB.Close()
@@ -222,7 +222,7 @@ func TestFirstPairingEncryptsCookieAndDefersSummaryUntilAPICheck(t *testing.T) {
 	if err = e2.Pair(context.Background(), PushServiceURL, "V2E-"+strings.Repeat("b", 24), ""); err != nil {
 		t.Fatal(err)
 	}
-	if queryInt(t, restored, "SELECT COUNT(*) FROM outbox") != 1 || queryInt(t, restored, "SELECT COUNT(*) FROM outbox WHERE status='pending'") != 0 {
+	if queryInt(t, restored, "SELECT COUNT(*) FROM outbox") != 3 || queryInt(t, restored, "SELECT COUNT(*) FROM outbox WHERE status='pending'") != 0 {
 		t.Fatal("re-pair repeated initial summary or retained old delivery")
 	}
 	entries, _ := os.ReadDir(dir)

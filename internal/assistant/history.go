@@ -11,6 +11,8 @@ import (
 
 type DeliveryHistoryItem struct {
 	Delivery
+	TestKind       string    `json:"test_kind,omitempty"`
+	AvatarURL      string    `json:"avatar_url,omitempty"`
 	Sequence       int64     `json:"sequence"`
 	NotificationID int64     `json:"notification_id"`
 	Title          string    `json:"title"`
@@ -94,6 +96,7 @@ func (s *Store) deliveryHistory(before int64, limit int, status, search, kind, e
 			item.Type = "notification"
 		}
 		item.Title, item.Body, item.NotificationID = event.Title, event.Body, event.NotificationID
+		item.TestKind, item.AvatarURL = event.TestKind, event.AvatarURL
 		item.UnreadCount, item.CreatedAt = event.UnreadCount, event.CreatedAt
 		page.Items = append(page.Items, item)
 	}

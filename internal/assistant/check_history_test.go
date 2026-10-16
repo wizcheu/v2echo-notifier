@@ -95,7 +95,9 @@ func TestCheckHistoryHybridOutcomes(t *testing.T) {
 			st.NextTokenCheck = now.Add(time.Hour)
 			switch kind {
 			case "same-id":
-				st.HasPushAPIID, st.LastPushAPIID = true, 30
+				hybridStep(t, e)
+				st = stateOf(t, e.Store)
+				st.NextWeb, st.NextCheck, st.NextAPI = time.Time{}, time.Time{}, time.Time{}
 			case "quota":
 				st.Quota = Quota{Limit: 120, Remaining: 0, Reset: now.Add(time.Hour), Observed: true}
 			case "api-cooldown":

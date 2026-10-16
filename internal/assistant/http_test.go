@@ -230,7 +230,7 @@ func TestPushTestManagementRoutesAndFixedService(t *testing.T) {
 	t.Cleanup(accounts.Close)
 	id := seedTestAccount(t, accounts, "synthetic-pat", "A2=synthetic")
 	e, _ := accounts.Get(id)
-	cfg := Config{APIToken: "synthetic-pat", Enabled: true, IntervalSeconds: 180, RelayURL: PushServiceURL, RelayToken: "synthetic-sender"}
+	cfg := Config{APIToken: "synthetic-pat", Enabled: true, IntervalSeconds: 180, RelayURL: PushServiceURL, RelayToken: "synthetic-sender", PushSchedule: allDaySchedule()}
 	st := State{AccountID: 7, Username: "tester", Verified: true, InitialPairingDone: true}
 	if err := e.Store.SaveConfig(cfg, st, false); err != nil {
 		t.Fatal(err)
