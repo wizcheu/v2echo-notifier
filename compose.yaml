@@ -3,6 +3,8 @@ services:
     build:
       context: .
       args:
+        APP_VERSION: ${APP_VERSION:-}
+        APP_REVISION: ${APP_REVISION:-}
         GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
         HTTP_PROXY: ${HTTP_PROXY:-}
         HTTPS_PROXY: ${HTTPS_PROXY:-}

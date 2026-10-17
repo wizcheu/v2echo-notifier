@@ -16,7 +16,7 @@ on:
           - browser
           - all
       image_tag:
-        description: "镜像标签（例如 edge、0.1.0 或 latest）"
+        description: "镜像版本号（同时显示在网页，例如 0.1.0 或 edge）"
         type: string
         required: true
         default: edge
@@ -49,16 +49,24 @@ jobs:
       packages: write
 
     steps:
-      - name: Validate manual image tag
-        if: github.event_name == 'workflow_dispatch'
+      - name: Resolve build version
+        id: version
         env:
-          IMAGE_TAG: ${{ inputs.image_tag }}
+          EVENT_NAME: ${{ github.event_name }}
+          MANUAL_VERSION: ${{ inputs.image_tag }}
+          REF_NAME: ${{ github.ref_name }}
         shell: bash
         run: |
-          if [[ ! "$IMAGE_TAG" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127}$ ]]; then
-            echo '::error::镜像标签需为 1–128 个字母、数字、下划线、点或连字符，且不能以点或连字符开头。'
-            exit 1
+          if [[ "$EVENT_NAME" == 'workflow_dispatch' ]]; then
+            version="$MANUAL_VERSION"
+            if [[ ! "$version" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127}$ ]]; then
+              echo '::error::镜像版本号需为 1–128 个字母、数字、下划线、点或连字符，且不能以点或连字符开头。'
+              exit 1
+            fi
+          else
+            version="${REF_NAME#v}"
           fi
+          printf 'value=%s\n' "$version" >> "$GITHUB_OUTPUT"
 
       - name: Checkout
         uses: actions/checkout@v6
@@ -93,6 +101,7 @@ jobs:
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.description=V2Echo ${{ matrix.component }}
+            org.opencontainers.image.version=${{ steps.version.outputs.value }}
 
       - name: Build and push
         id: build
@@ -104,6 +113,9 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            APP_VERSION=${{ steps.version.outputs.value }}
+            APP_REVISION=${{ github.sha }}
           cache-from: type=gha,scope=${{ matrix.component }}
           cache-to: type=gha,mode=max,scope=${{ matrix.component }}
 
@@ -111,10 +123,14 @@ jobs:
         env:
           IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
           IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          APP_VERSION: ${{ steps.version.outputs.value }}
+          APP_REVISION: ${{ github.sha }}
         shell: bash
         run: |
           {
             echo '## 镜像已发布'
+            echo
+            printf '版本：`%s` · 提交：`%s`\n' "$APP_VERSION" "$APP_REVISION"
             echo
             echo '支持 linux/amd64 和 linux/arm64。按本次实际发布的标签拉取：'
             echo

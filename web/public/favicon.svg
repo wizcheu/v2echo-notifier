@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  width="1024"
+  height="1024"
+  viewBox="0 0 1024 1024"
+  role="img"
+  aria-labelledby="title description"
+>
+  <title id="title">V2Echo app icon</title>
+  <desc id="description">
+    A purple rounded V with four violet echo lines on a white background.
+  </desc>
+
+  <rect width="1024" height="1024" fill="#FFFFFF" />
+
+  <path
+    d="M 380 240
+       L 276 240
+       C 250 240 234 266 244 291
+       L 442 798
+       C 453 828 481 848 512 848
+       C 543 848 571 828 582 798
+       L 780 291
+       C 790 266 774 240 748 240
+       L 644 240
+       C 622 240 610 253 602 274
+       L 526 515
+       C 521 531 517 541 512 551
+       C 507 541 503 531 498 515
+       L 422 274
+       C 414 253 402 240 380 240
+       Z"
+    fill="#6C5CE7"
+  />
+
+  <g
+    fill="none"
+    stroke="#8E7CF0"
+    stroke-width="24"
+    stroke-linecap="round"
+  >
+    <path d="M 184 308 C 218 356 250 425 276 518" />
+    <path d="M 154 370 C 184 413 205 458 222 498" />
+    <path d="M 840 308 C 806 356 774 425 748 518" />
+    <path d="M 870 370 C 840 413 819 458 802 498" />
+  </g>
+</svg>

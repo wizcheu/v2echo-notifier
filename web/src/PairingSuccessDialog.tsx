@@ -1,3 +1,4 @@
+import Icon from './Icon'
 import { useEffect, useId, useRef } from 'react'
 
 export default function PairingSuccessDialog({ username, onTest, onClose }: {
@@ -16,6 +17,7 @@ export default function PairingSuccessDialog({ username, onTest, onClose }: {
 
   return <dialog ref={dialog} className="pairing-success-dialog" aria-labelledby={title} aria-describedby={`${description} ${refreshHint}`}
     onCancel={event => { event.preventDefault(); onClose() }}>
+    <span className="dialog-symbol success"><Icon name="check_circle" /></span>
     <h2 id={title}>已成功绑定</h2>
     <p id={description}>@{username} 的接收设备已绑定成功。可以发送一条测试推送，确认 App 能收到通知。</p>
     <p id={refreshHint}>请在 App 的「远程推送」页面点击刷新按钮，更新配对状态。</p>

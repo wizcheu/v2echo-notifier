@@ -152,7 +152,7 @@ export default function AccountSwitcher({
               <Icon name="user_3" />
               管理账号
             </a>
-            <button className="mobile-only logout" role="menuitem" disabled={loggingOut} onClick={() => {setLoggingOut(true); void onLogout().catch(() => setLogoutError('退出失败，请重试。')).finally(() => setLoggingOut(false))}}><Icon name="exit" />{loggingOut ? '正在退出…' : '退出管理页'}</button>
+            <button className="mobile-only logout" role="menuitem" disabled={loggingOut} onClick={() => {setLoggingOut(true); void onLogout().catch(() => setLogoutError('退出失败，请重试。')).finally(() => setLoggingOut(false))}}><Icon name="exit_line" />{loggingOut ? '正在退出…' : '退出管理页'}</button>
             {logoutError && <p role="alert">{logoutError}</p>}
           </div>
         </div>

@@ -4,7 +4,9 @@ import { accountHref, navigate } from './routes'
 import { useRoute } from './useRoute'
 import { checkHistoryHref, readCheckLocation } from './checkHistoryLocation'
 import { formatTime } from './formatTime'
-import Icon from './Icon'
+import Loader from './components/kokonutui/loader'
+import EmptyState from './components/app/EmptyState'
+import SegmentedNavigation from './components/app/SegmentedNavigation'
 
 type Stage = { status: string; http_status?: number; duration_ms: number; detail: string }
 export type CheckRecord = {
@@ -99,15 +101,17 @@ export default function CheckHistory({ accountID, onExpired }: { accountID: stri
         <div><h2 id="check-history-title">最近检查</h2><p className="caption">{records ? `已记录 ${records.length} 条 · 最新在前` : '每个账号保留最近 50 条'}</p></div>
         <button type="button" disabled={refreshing} onClick={() => void refreshRef.current(true)}>{refreshing ? '正在刷新…' : '刷新记录'}</button>
       </div>
-      <nav className="check-filters" aria-label="检查记录筛选">
-        <a href={checkHistoryHref(accountHref(accountID, 'checkHistory'), { attention: false, record: null })} aria-current={!location.attention ? 'true' : undefined}>全部 <span>{records?.length ?? '—'}</span></a>
-        <a href={checkHistoryHref(accountHref(accountID, 'checkHistory'), { attention: true, record: null })} aria-current={location.attention ? 'true' : undefined}>需要关注 <span>{records ? attention : '—'}</span></a>
-      </nav>
+      <SegmentedNavigation label="检查记录筛选" className="check-filters" items={[
+        { href: checkHistoryHref(accountHref(accountID, 'checkHistory'), { attention: false, record: null }), label: <>全部 <span>{records?.length ?? '—'}</span></>, active: !location.attention },
+        { href: checkHistoryHref(accountHref(accountID, 'checkHistory'), { attention: true, record: null }), label: <>需要关注 <span>{records ? attention : '—'}</span></>, active: location.attention },
+      ]} />
       {error && <div className="notice error" role="alert"><span>{error}{records ? '；当前显示上次读取的记录。' : ''}</span><button onClick={() => void refreshRef.current(true)} disabled={refreshing}>重试</button></div>}
       {pendingRecords && <div className="notice check-new-records" role="status"><span>有新的检查记录，当前阅读位置已保留。</span><button className="text-button" onClick={() => void refreshRef.current(true)} disabled={refreshing}>显示最新记录</button></div>}
       {missing && <div className="notice" role="status"><span>这条记录已不在最近 50 条中。</span><button className="text-button" onClick={() => update({ record: null })}>关闭详情</button></div>}
-      {!records && !error && <p className="empty" role="status">正在读取检查记录…</p>}
-      {records && !visible.length && <div className="empty"><Icon name="check_circle" /><h3>{records.length ? '没有需要关注的检查' : '还没有检查记录'}</h3><p>{records.length ? '最近保留的检查均已完成。' : '启用同步后，实际发起的检查会记录在这里。升级前的检查不会补录。'}</p>{!records.length && <a className="text-link" href={accountHref(accountID, 'sync')}>查看同步设置</a>}</div>}
+      {!records && !error && <Loader size="sm" title="正在读取检查记录…" subtitle="" />}
+      {records && !visible.length && <EmptyState icon="check_circle" title={records.length ? '没有需要关注的检查' : '还没有检查记录'} description={records.length ? '最近保留的检查均已完成。' : '启用同步后，实际发起的检查会记录在这里。升级前的检查不会补录。'}>
+        {!records.length && <a className="text-link" href={accountHref(accountID, 'sync')}>查看同步设置</a>}
+      </EmptyState>}
       {!!visible.length && <>
         <div className="check-columns" aria-hidden="true"><span>检查时间</span><span>结果</span><span>未读数</span><span>耗时</span><span>检查摘要</span><span /></div>
         <ol className="check-list">

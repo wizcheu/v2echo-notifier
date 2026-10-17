@@ -1,3 +1,4 @@
+import EmptyState from './components/app/EmptyState'
 import { useState } from 'react'
 import AccountAvatar from './AccountAvatar'
 import RemoveAccountDialog from './RemoveAccountDialog'
@@ -81,11 +82,9 @@ export default function AccountManager({
       )}
       <div className="content-surface">
       {!accounts.length && (
-        <section className="panel">
-          <h2>还没有账号</h2>
-          <p className="muted">准备同账号的 API Token 和网页 Cookie，即可添加并开始验证。</p>
+        <EmptyState icon="user_3" title="还没有账号" description="准备同账号的 API Token 和网页 Cookie，即可添加并开始验证。">
           <TokenHelp />
-        </section>
+        </EmptyState>
       )}
       {[
         { title: '需要处理', items: accounts.filter(needsAttention) },
@@ -98,7 +97,7 @@ export default function AccountManager({
               {group.title === '其他账号' && !accounts.some(needsAttention) ? '全部账号' : group.title}
               <small> {group.items.length}</small>
             </h2>
-            {group.title === '其他账号' && <div className="account-columns" aria-hidden="true"><span>账号</span><span>凭据状态</span><span>同步</span><span className="account-operation-label">操作</span></div>}
+
             <div className="account-list">
               {group.items.map((account) => (
                 <section className={`account-row ${needsAttention(account) ? 'needs-attention' : ''}`} key={account.id}>

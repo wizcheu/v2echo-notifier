@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import Select from './components/app/Select'
+import ParticleButton from './components/kokonutui/particle-button'
+import Loader from './components/kokonutui/loader'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
-import AccountWorkspace from './AccountWorkspace'
 import AccountManager from './AccountManager'
 import type { Account } from './AccountManager'
 import SecretField from './SecretField'
@@ -9,6 +11,8 @@ import LoginLayout from './LoginLayout'
 import { api, APIError } from './api'
 import { accountHref, navigate } from './routes'
 import { useRoute } from './useRoute'
+
+const AccountWorkspace = lazy(() => import('./AccountWorkspace'))
 
 type ProxyMode = 'environment' | 'direct' | 'custom'
 const emptyProxy = { proxy_mode: 'environment' as ProxyMode, proxy_url: '' }
@@ -119,7 +123,7 @@ export default function App() {
               <button onClick={() => void refreshAccounts()}>重新连接</button>
             </>
           ) : (
-            <p role="status">正在连接通知助手…</p>
+            <Loader size="sm" title="正在连接通知助手…" subtitle="读取服务器上的账号状态" />
           )}
         </div>
       </LoginLayout>
@@ -152,12 +156,13 @@ export default function App() {
           </button>
         )}
       </header>
+      <div className={authenticated ? 'add-fields' : 'login-fields'}>
       {authenticated ? (
         <>
           <h2 className="add-connection-title">服务器连接</h2>
           <label>
             验证与同步的连接方式
-            <select
+            <Select
               value={newProxy.proxy_mode}
               disabled={busy}
               onChange={(e) => setNewProxy({ proxy_mode: e.target.value as ProxyMode, proxy_url: '' })}
@@ -165,7 +170,7 @@ export default function App() {
               <option value="environment">使用环境变量代理</option>
               <option value="custom">自定义 HTTP / HTTPS 代理</option>
               <option value="direct">直接连接</option>
-            </select>
+            </Select>
           </label>
           {newProxy.proxy_mode === 'custom' && (
             <>
@@ -225,10 +230,12 @@ export default function App() {
           {error || listError}
         </p>
       )}
-      <button className="primary" disabled={busy}>
-        {busy ? (authenticated ? '正在验证账号…' : '处理中…') : authenticated ? '验证并保存账号' : '进入管理页'}
-      </button>
+      <ParticleButton type="submit" status={busy ? 'pending' : 'idle'} disabled={busy} fullWidth={!authenticated}
+        pendingLabel={authenticated ? '正在验证账号…' : '正在连接…'}>
+        {authenticated ? '验证并保存账号' : '进入管理页'}
+      </ParticleButton>
       {authenticated ? <div className="add-footnotes"><p className="caption">验证连接立即生效；成功后与账号一起保存，之后可在网络代理中修改。</p><p className="caption">验证失败会显示具体原因；若已保存为待网页验证账号，请进入账号完成验证。</p></div> : <p className="caption">一个管理密钥可管理这里的全部账号，<br />请只交给可信的管理员。</p>}
+      </div>
       {authenticated && (
         <aside className="add-help">
           <h2>准备凭据</h2>
@@ -272,7 +279,7 @@ export default function App() {
           onRemove={removeAccount}
         />
       ) : route.kind === 'workspace' && exists ? (
-        <AccountWorkspace
+        <Suspense fallback={<Loader title="正在打开工作台…" subtitle="" size="sm" />}><AccountWorkspace
           key={selected}
           accountID={selected}
           tab={route.page}
@@ -281,9 +288,9 @@ export default function App() {
             await removeAccount(selected)
             navigate('#/accounts', true)
           }}
-        />
+        /></Suspense>
       ) : route.kind === 'home' ? (
-        <p role="status">正在打开工作台…</p>
+        <Loader size="sm" title="正在打开工作台…" subtitle="" />
       ) : (
         <section className="empty">
           <h1>{route.kind === 'workspace' ? '账号不存在或已移除' : '找不到这个页面'}</h1>

@@ -1,4 +1,7 @@
-import { useEffect, useState } from 'react'
+import Select from './components/app/Select'
+import Loader from './components/kokonutui/loader'
+import EmptyState from './components/app/EmptyState'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRoute } from './useRoute'
 import { navigate } from './routes'
 import { readHistoryLocation, historyHref } from './historyLocation'
@@ -58,6 +61,26 @@ export default function PushHistory({
   const [loading, setLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState('')
+  const detailOrigin = useRef<string | null>(null)
+  const detailTrigger = useRef<HTMLAnchorElement | null>(null)
+  const list = useRef<HTMLElement>(null)
+  const restoreDetailFocus = useCallback(() => {
+    const target = detailTrigger.current?.isConnected ? detailTrigger.current : list.current?.querySelector('input')
+    target?.focus({ preventScroll: true })
+  }, [])
+  const [retainedDetail, setRetainedDetail] = useState<PushHistoryItem | null>(null)
+  const currentDetail = page?.items.find(item => item.event_id === location.event)
+  useEffect(() => {
+    if (!location.event) {
+      detailOrigin.current = null
+      setRetainedDetail(null)
+    } else if (currentDetail) setRetainedDetail(currentDetail)
+  }, [location.event, currentDetail])
+  function closeDetail() {
+    const listHref = historyHref(hash, { ...location, event: '' })
+    if (detailOrigin.current === listHref) window.history.back()
+    else navigate(listHref, true)
+  }
   const before = cursors[cursors.length - 1]!
   useEffect(() => {
     let cancelled = false,
@@ -90,17 +113,15 @@ export default function PushHistory({
     }
     void refresh()
     const timer = window.setInterval(() => void refresh(), 5000)
-      return () => {
+    return () => {
       cancelled = true
       window.clearInterval(timer)
     }
   }, [before, query, status, revision, loadPage])
 
-useEffect(() => {window.scrollTo(0, 0); document.title = `${location.event ? '推送详情' : '推送历史'} · V2Echo`}, [location.event])
-  if (location.event) return <PushDetail item={page?.items.find(item => item.event_id === location.event)} loading={!page} error={error} username={username} onBack={() => update({event:''})} />
-
   return (
-    <section className="panel push-history content-surface">
+    <>
+    <section ref={list} className="panel push-history content-surface">
       <form
         className="history-filters"
         onSubmit={(event) => {
@@ -109,7 +130,7 @@ useEffect(() => {window.scrollTo(0, 0); document.title = `${location.event ? '�
           setRevision((r) => r + 1)
         }}
       >
-        <label>
+        <label className="history-search">
           搜索内容
           <input
             type="text"
@@ -121,7 +142,7 @@ useEffect(() => {window.scrollTo(0, 0); document.title = `${location.event ? '�
         </label>
         <label>
           处理状态
-          <select
+          <Select
             value={status}
             onChange={(e) => {
               update({ cursors: [0], status: e.target.value })
@@ -133,7 +154,7 @@ useEffect(() => {window.scrollTo(0, 0); document.title = `${location.event ? '�
                 {label}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
         <button type="submit" className="primary" disabled={loading}>
           搜索
@@ -185,15 +206,9 @@ useEffect(() => {window.scrollTo(0, 0); document.title = `${location.event ? '�
           </div>
         )}
         {!page ? (
-          <p className="empty" role="status">
-            {error ? '暂时无法显示推送历史。' : '正在读取推送历史…'}
-          </p>
+          error ? <EmptyState title="暂时无法显示推送历史" description="请检查连接后刷新重试。" /> : <Loader size="sm" title="正在读取推送历史…" subtitle="" />
         ) : page.items.length === 0 ? (
-          <p className="empty">
-            {query || status
-              ? '没有符合条件的推送记录。'
-              : '还没有推送记录。通知或网页未读汇总进入上报队列后会显示在这里。'}
-          </p>
+          <EmptyState title={query || status ? '没有符合条件的推送记录' : '还没有推送记录'} description={query || status ? '试试其他关键词或清除筛选。' : '通知或网页未读汇总进入上报队列后，会显示在这里。'} />
         ) : (
           <ul className="push-history-list" aria-label="推送事件">
             {page.items.map((item) => {
@@ -209,14 +224,13 @@ useEffect(() => {window.scrollTo(0, 0); document.title = `${location.event ? '�
                   : 'neutral'
               return (
                 <li key={item.event_id}>
-                  <details open={location.event === item.event_id}>
-                    <summary
-                      className="history-row"
-                      onClick={(e) => {
-                        e.preventDefault()
-                        update({ event: location.event === item.event_id ? '' : item.event_id })
-                      }}
-                    >
+                  <a className="history-row" href={historyHref(hash, { ...location, event: item.event_id })} aria-haspopup="dialog"
+                    onClick={event => {
+                      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+                      detailOrigin.current = hash
+                      detailTrigger.current = event.currentTarget
+                      event.currentTarget.focus({ preventScroll: true })
+                    }}>
                       <span className="history-message">
                         <strong>
                           {summary
@@ -245,11 +259,9 @@ useEffect(() => {window.scrollTo(0, 0); document.title = `${location.event ? '�
                             : '尚未尝试'}
                       </span>
                       <span className="detail-label">
-                        {location.event === item.event_id ? '收起' : '详情'} <span aria-hidden="true">›</span>
+                        详情 <span aria-hidden="true">›</span>
                       </span>
-                    </summary>
-
-                  </details>
+                    </a>
                 </li>
               )
             })}
@@ -279,5 +291,10 @@ useEffect(() => {window.scrollTo(0, 0); document.title = `${location.event ? '�
         历史按进入队列的先后倒序排列，保存在当前服务器。升级前未记录的时间显示为“未记录”；首次导入且未安排推送的通知仅在“通知记录”中展示。
       </p>
     </section>
+    {location.event && <PushDetail key={location.event}
+      item={currentDetail ?? (retainedDetail?.event_id === location.event ? retainedDetail : undefined)}
+      loading={!page && !error} error={error} username={username}
+      onClose={closeDetail} onRetry={() => setRevision(r => r + 1)} onRestoreFocus={restoreDetailFocus} />}
+    </>
   )
 }

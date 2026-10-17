@@ -39,6 +39,8 @@ docker compose exec notifier /notifier -data /data -print-admin-token
 
 打开 `http://<宿主机地址>:8282` 登录。`latest` 指向最近发布的正式版本；需要固定版本时，将标签替换为已发布版本（例如 `0.1.0`）。`edge` 是手动构建默认使用的测试标签；默认不更新 `latest`，发布者可在运行工作流时明确选择更新。
 
+登录页和管理页底部显示当前镜像构建时写入的版本号与短提交号，可用于核对升级结果。通过 `latest` 拉取的镜像仍显示发布者填写的实际版本；旧镜像需升级到支持版本显示的构建后才会出现。
+
 如果拉取提示 `manifest unknown`，说明指定标签可能尚未发布。只做过默认手动构建时可先使用 `ghcr.io/wizcheu/v2echo-notifier:edge`，或由维护者按[镜像发布说明](development.md#发布容器镜像)发布 `latest`。以成功工作流摘要中的拉取命令为准。
 
 更新镜像时再次执行 `docker compose pull` 和 `docker compose up -d`。从源码构建迁移时，在原 `compose.yaml` 中用 `image:` 替换整个 `build:` 块；保留原 Compose 项目名称、部署目录和 `notifier-data:/data` 卷映射，继续使用原有配置与历史。不要执行会删除数据卷的 `docker compose down -v`。
@@ -51,6 +53,18 @@ docker compose exec notifier /notifier -data /data -print-admin-token
 docker compose up -d --build
 docker compose exec notifier /notifier -data /data -print-admin-token
 ```
+
+源码构建默认在网页显示 `web/package.json` 中的版本加 `-dev`。需要自定义版本时，在构建前设置公开版本信息（也可写入 Compose 同目录的 `.env`）：
+
+```sh
+APP_VERSION=0.1.0 APP_REVISION=$(git rev-parse HEAD) docker compose up -d --build
+```
+
+直接使用 Dockerfile 时，传入 `--build-arg APP_VERSION=0.1.0 --build-arg APP_REVISION=<提交号>`；仅重启容器或修改运行时变量不会更新网页版本。
+
+构建阶段从 Docker Hub 获取 Node 和 Go 官方镜像；运行镜像使用 `scratch`，包含静态程序及从 Go 构建镜像复制的 HTTPS 根证书、时区数据，以 UID/GID `65532:65532` 运行。无需访问 `gcr.io`。已有数据卷继续使用原来的用户和权限。
+
+如果旧版构建在 `load metadata for gcr.io/distroless/static-debian12:nonroot` 处出现 `EOF`，先同步新版 Dockerfile 后重新构建。如果仍在 `load metadata for docker.io/...` 阶段失败，检查 NAS 的 Docker daemon / BuildKit 到 Docker Hub 的连接和代理；`GOPROXY` 和下面的构建步骤代理参数不能解决基础镜像拉取失败。
 
 如果下载 Go 依赖超时，可通过 `GOPROXY` 指定可访问的模块镜像，例如 [Goproxy.cn](https://goproxy.cn/)：
 

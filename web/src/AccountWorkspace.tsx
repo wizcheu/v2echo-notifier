@@ -1,3 +1,8 @@
+import ParticleButton from './components/kokonutui/particle-button'
+import Loader from './components/kokonutui/loader'
+import SettingsLayout from './components/app/SettingsLayout'
+import Dashboard from './Dashboard'
+import NotificationList from './NotificationList'
 import AssistantConnection from './AssistantConnection'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
@@ -5,14 +10,12 @@ import PushScheduleFields, { defaultPushSchedule, scheduleError, scheduleDescrip
 import type { PushSchedule, PushScheduleStatus } from './PushSchedule'
 import RemoveAccountDialog from './RemoveAccountDialog'
 import { formatTime } from './formatTime'
-import { useRoute } from './useRoute'
-import { readHistoryLocation } from './historyLocation'
 import PushHistory from './PushHistory'
 import CheckHistory from './CheckHistory'
 import SecretField from './SecretField'
 import { TokenHelp } from './AccountManager'
 import { api, APIError } from './api'
-import { accountHref, activePage, navigate, pages } from './routes'
+import { accountHref, navigate, pages } from './routes'
 import type { Page } from './routes'
 import Icon from './Icon'
 import type { PushHistoryPage } from './PushHistory'
@@ -101,7 +104,6 @@ export default function AccountWorkspace({
   onExpired: () => void
   onRemove: () => Promise<void>
 }) {
-  const { hash } = useRoute()
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null)
   const href = (page: Page) => accountHref(accountID, page)
   const setTab = (page: Page) => navigate(href(page))
@@ -269,7 +271,7 @@ export default function AccountWorkspace({
 
   if (!snapshot)
     return (
-      <section className="panel">
+      <section className="panel content-surface">
         {connectionError ? (
           <>
             <p className="notice error" role="alert">
@@ -278,7 +280,7 @@ export default function AccountWorkspace({
             <button onClick={() => void refresh()}>重新连接</button>
           </>
         ) : (
-          <p role="status">正在读取状态…</p>
+          <Loader title="正在读取状态…" subtitle="连接当前账号的工作台" size="sm" />
         )}
       </section>
     )
@@ -309,7 +311,6 @@ export default function AccountWorkspace({
   const credentialIssue = Boolean(state.token_issue || state.cookie_issue || state.auth_blocked)
   const recovery = tab === 'overview' && credentialIssue
   const cookieVerified = config.cookie_configured && !state.cookie_issue && Boolean(state.cookie_checked_at && !state.cookie_checked_at.startsWith('0001'))
-  const detailOpen = tab === 'pushHistory' && Boolean(readHistoryLocation(hash).event)
   const pairingSucceeded = async () => {
     if (!active.current) return
     setPairCode('')
@@ -330,34 +331,20 @@ export default function AccountWorkspace({
       await pairingSucceeded()
     } finally { setPairCookie('') }
   })
-  const settingsTabs = (
-    <nav className="settings-tabs" aria-label="设置分类">
-      {(
-        [
-          ['settings', '账号凭据'],
-          ['device', '接收设备'],
-          ['sync', '同步偏好'],
-        ] as const
-      ).map(([key, label]) => (
-        <a key={key} href={href(key)} aria-current={tab === key ? 'page' : undefined}>
-          {label}
-        </a>
-      ))}
-    </nav>
-  )
+
   return (
     <>
-      {!detailOpen && <header className="page-header">
+      <header className="page-header">
         <div>
-          <h1><span className="desktop-title">{onboarding ? '完成通知连接' : recovery ? `需要更新${state.cookie_issue ? '网页 Cookie' : ' API Token'}` : pages[tab].title}</span><span className="mobile-title">{onboarding ? '完成通知连接' : recovery ? '更新账号凭据' : tab === 'device' ? '接收设备' : tab === 'sync' ? '同步偏好' : tab === 'credentials' ? '更新凭据' : pages[tab].title}</span></h1>
-          <p className="page-description"><span className="desktop-title">{onboarding ? `@${state.username} 已验证，继续配对设备并开启同步。` : recovery ? state.cookie_issue ? '网页未读检查已暂停，请更新 Cookie。' : '当前账号的 API 请求已暂停，请更新凭据。' : tab === 'overview' ? `@${state.username} 的同步与推送状态。` : pages[tab].description}</span><span className="mobile-title">{onboarding ? `@${state.username} 已验证，继续配对设备并开启同步。` : recovery ? state.cookie_issue ? '网页未读检查已暂停，请更新 Cookie。' : '当前账号的 API 请求已暂停，请更新凭据。' : tab === 'settings' ? `@${state.username} 的凭据、设备与同步偏好` : ['overview','device','sync','credentials'].includes(tab) ? `当前账号 @${state.username}` : pages[tab].description}</span></p>
+          <h1>{onboarding ? '完成通知连接' : recovery ? `需要更新${state.cookie_issue ? '网页 Cookie' : ' API Token'}` : tab === 'device' ? '接收设备' : tab === 'sync' ? '同步偏好' : pages[tab].title}</h1>
+          <p className="page-description">{onboarding ? `@${state.username} 已验证，继续配对设备并开启同步。` : recovery ? state.cookie_issue ? '网页未读检查已暂停，请更新 Cookie。' : '当前账号的 API 请求已暂停，请更新凭据。' : tab === 'overview' ? `@${state.username} 的同步与推送状态。` : pages[tab].description}</p>
         </div>
-        {(['credentials', 'runtime', 'device', 'sync'].includes(tab)) && (
-          <a className={`back-link ${tab === 'device' || tab === 'sync' ? 'mobile-only' : ''}`} href={href(tab === 'runtime' ? 'overview' : 'settings')}>
+        {(['credentials', 'runtime'].includes(tab)) && (
+          <a className="back-link" href={href(tab === 'runtime' ? 'overview' : 'settings')}>
             {tab === 'runtime' ? '返回运行概览' : '返回设置'}
           </a>
         )}
-      </header>}
+      </header>
       {pairingBlocked && tab !== 'overview' && (
         <div className="notice" role="status">
           <span>接收设备需重新配对，自动检查与推送已暂停。</span>
@@ -434,126 +421,14 @@ export default function AccountWorkspace({
         <dl className="details"><div><dt>最近成功检查</dt><dd>{time(state.last_success)}</dd></div><div><dt>下一步</dt><dd>更新凭据 → 等待验证 → 恢复检查</dd></div></dl>
         <a className="text-link" href={href('history')}>查看历史记录</a><p className="caption">网络故障或访问挑战会显示连接错误与重试入口，不会直接判定凭据过期。</p>
       </div>}
-      {tab === 'overview' && !onboarding && !recovery && (
-        <>
-          {(!configured || !state.verified || !relayReady || !config.enabled || !config.cookie_configured) && (
-            <section className="setup-steps" aria-label="完成连接">
-              <a href={href('credentials')}>
-                <span className="step-number">1</span>
-                <div>
-                  <strong>验证账号凭据</strong>
-                  <small>
-                    {state.verified && config.cookie_configured && !state.cookie_issue
-                      ? '凭据已配置'
-                      : '补充或更新 Token 与 Cookie'}
-                  </small>
-                </div>
-                <Icon name="arrow_right" />
-              </a>
-              <a href={href('device')}>
-                <span className="step-number">2</span>
-                <div>
-                  <strong>配对接收设备</strong>
-                  <small>{relayReady ? '已配对' : '输入 App 中生成的配对码'}</small>
-                </div>
-                <Icon name="arrow_right" />
-              </a>
-              <a href={href('sync')}>
-                <span className="step-number">3</span>
-                <div>
-                  <strong>开启同步与上报</strong>
-                  <small>{config.enabled ? '已启用' : '设置检查间隔并启用'}</small>
-                </div>
-                <Icon name="arrow_right" />
-              </a>
-            </section>
-          )}
-          <div className="overview-content">
-          <section className={`health-summary ${resting ? 'resting-summary' : ''}`}>
-            <Icon name={pairingBlocked ? 'lock' : resting ? 'moon' : state.auth_blocked || state.cookie_issue ? 'lock' : 'check_circle'} />
-            <div>
-              <h2>{pairingBlocked ? phase : resting ? '休息时段，暂不打扰' : phase}</h2>
-              {pairingBlocked ? <><p>自动检查与推送已暂停，旧连接无法继续接收新提醒。</p><p className="caption">在 App 中生成新的配对码，重新配对后按同步开关与推送时段恢复。</p></> : resting ? <><p>自动检查已暂停 · 推送已暂停</p><p className="caption">{resumeText} · {scheduleDescription(schedule)}</p></> : <><p><span className="desktop-title">最近检查完成于 {time(state.last_success)} · 下次允许检查 {config.enabled && !state.auth_blocked && !state.cookie_issue ? time(next) : '等待启用或更新凭据'}</span><span className="mobile-title">最近完成 {formatTime(state.last_success, false).replace('今天 ', '')} · 下次允许 {formatTime(next, false).replace('今天 ', '')}</span></p>
-              <p className="caption">
-                {config.enabled ? '同步已启用' : '同步已暂停'}，
-                {snapshot.relay_blocked ? '接收设备需要重新配对' : relayReady ? '接收设备已配对' : '接收设备尚未配对'}。
-              </p></>}
-            </div>
-            {pairingBlocked ? <a className="button" href={href('device')}>重新配对设备</a> : resting ? <a className="button" href={href('sync')}>调整推送时段</a> : <button
-              disabled={busy || pairingBlocked || resting || !config.enabled || state.auth_blocked || Boolean(state.cookie_issue)}
-              onClick={() =>
-                void action(async () => {
-                  await api(accountPath('check'), 'POST', {})
-                  await refresh()
-                  setMessage('已安排检查，仍会遵守额度限制和错误退避。')
-                })
-              }
-            >
-              立即检查
-            </button>}
-          </section>
-          <div className="metrics">
-            <div>
-              <span>网页未读快照</span>
-              <strong>{state.has_web_unread ? `${state.web_unread_count} 条` : '—'}</strong>
-              <small>{state.has_web_unread ? time(state.web_observed_at) : '保存 Cookie 后读取'}</small>
-            </div>
-            <div>
-              <span>待处理事件</span>
-              <strong>{snapshot.pending_count.toLocaleString()} 条</strong>
-              <a className="metric-link" href={href('pushHistory') + '?status=pending'}>
-                查看处理进度 <span aria-hidden="true">›</span>
-              </a>
-            </div>
-            <div className="quota-metric">
-              <span>所有账号共享额度</span>
-              <strong>{state.quota.limit ? `${state.quota.remaining} / ${state.quota.limit}` : '—'}</strong>
-              <small>
-                {state.quota.observed ? `最近额度窗口截至 ${time(state.quota.reset)}` : '尚无响应额度，使用保守预算'}
-              </small>
-            </div>
-          </div>
-          <section className="connection-summary">
-            <div>
-              <h2><span className="desktop-title">推送连接</span><span className="mobile-title">接收设备</span></h2>
-              <h3>
-                {state.username ? `@${state.username}` : '待验证账号'} ·{' '}
-                {snapshot.relay_blocked ? '需重新配对' : relayReady ? '已配对' : '尚未配对'}
-              </h3>
-              <p className="caption">
-                {pairingBlocked ? '自动检查与推送已暂停，请重新配对接收设备。' : resting ? `${resumeText}，恢复后先检查最新未读。` : !relayReady || !config.enabled
-                  ? '完成配对并启用后开始上报。'
-                  : snapshot.relay_next_sync * 1000 > Date.now()
-                      ? `下次允许通信 ${time(snapshot.relay_next_sync)}`
-                      : '有待处理事件时上报，至少 30 秒一轮。'}
-              </p>
-            </div>
-            <div className="account-actions">
-              <a className="button" href={href('pushTest')}>
-                {resting ? '查看推送测试记录' : '发送测试推送'}
-              </a>
-              <a className="text-link" href={href('device')}>
-                连接设置
-              </a>
-            </div>
-          </section>
-          <section className="panel">
-            <div className="section-heading">
-              <h2>最近通知</h2>
-              <a className="text-link" href={href('history')}>
-                全部通知记录
-              </a>
-            </div>
-            <NotificationList items={notifications.slice(0, 5)} />
-          </section>
-          </div><footer className="overview-footer">
-            <a className="text-link" href={href('runtime')}>
-              同步与额度详情 <span aria-hidden="true">›</span>
-            </a>
-            <a className="text-link mobile-only" href={href('history')}>查看通知记录</a><p className="caption">网页未读来自首页快照；初次导入的历史通知不会推送。</p>
-          </footer>
-        </>
-      )}
+      {tab === 'overview' && !onboarding && !recovery && <Dashboard accountID={accountID} state={state} config={config} notifications={notifications}
+        configured={configured} pendingCount={snapshot.pending_count} relayReady={relayReady} pairingBlocked={pairingBlocked}
+        resting={resting} busy={busy} phase={phase} nextCheck={next} nextSync={snapshot.relay_next_sync} schedule={schedule} resumeText={resumeText}
+        onCheck={() => void action(async () => {
+          await api(accountPath('check'), 'POST', {})
+          await refresh()
+          setMessage('已安排检查，仍会遵守额度限制和错误退避。')
+        })} />}
       {tab === 'runtime' && (
         <div className="overview-grid runtime-details content-surface">
           <section className="panel">
@@ -645,7 +520,7 @@ export default function AccountWorkspace({
       )}
       {needsConfig && !configLoaded && (
         <section className="panel" aria-busy={configLoading}>
-          <p role="status">{configLoading ? '正在读取已保存设置…' : '已保存设置暂时不可用。'}</p>
+          {configLoading ? <Loader size="sm" title="正在读取已保存设置…" subtitle="" /> : <p role="status">已保存设置暂时不可用。</p>}
           {!configLoading && (
             <button type="button" onClick={() => void loadSavedConfig().catch(() => {})}>
               重新读取
@@ -659,9 +534,9 @@ export default function AccountWorkspace({
         </p>
       )}
       {tab === 'settings' && (
+        <SettingsLayout accountID={accountID} page={tab}>
         <div className="settings credentials-overview">
           <section className="panel credential-group settings-card">
-          {settingsTabs}
             <h2>账号凭据</h2>
             <p className="muted">两项凭据应属于同一个 V2EX 账号，仅加密保存在此服务器。</p>
             <div className="setting-rows">
@@ -696,12 +571,10 @@ export default function AccountWorkspace({
                 <span className="row-action">查看 / 编辑</span>
               </a>
             </div>
-            <div className="credential-update-link"><p className="muted">显示、复制或替换凭据；留空保存保留原值。</p><a className="button primary" href={href('credentials')}><span className="desktop-title">更新凭据</span><span className="mobile-title">查看或更新凭据</span></a></div>
+            <div className="credential-update-link"><p className="muted">显示、复制或替换凭据；留空保存保留原值。</p><a className="button primary" href={href('credentials')}>更新凭据</a></div>
           </section>
-          <section className="mobile-only mobile-setting-section"><h2>接收设备</h2><h3>@{state.username} · {pairingBlocked ? '需重新配对' : relayReady ? '已配对' : '尚未配对'}</h3><p className="muted">重新配对、查看发送 Token 或发送测试。</p><a className="button" href={href('device')}>管理接收设备</a></section>
-          <section className="mobile-only mobile-setting-section"><h2>同步偏好</h2><h3>{config.enabled ? '已启用' : '已暂停'} · 期望每 {config.interval_seconds} 秒检查</h3><p className="muted">{scheduleDescription(schedule)}（UTC+8）；休息期间暂停检查与推送。</p><a className="button" href={href('sync')}>调整同步与网络</a></section>
-          <section className="panel credential-explainer">
-            <h2>凭据如何使用</h2>
+          <details className="credential-explainer">
+            <summary>凭据如何使用与保存</summary>
             <p className="muted">
               Token 用于访问官方 API。Cookie
               用于读取首页未读数，不执行已读操作，也不发送给推送服务。网页读取失败时暂停本轮提醒。
@@ -710,7 +583,7 @@ export default function AccountWorkspace({
               凭据失效会在概览与账号管理中提示。网络故障或访问挑战不会直接判定为过期。未配置 Cookie
               的已有账号仍使用逐条通知提醒。
             </p>
-          </section>
+          </details>
           <section className="panel danger-zone">
             <h2>移除当前账号</h2>
             <p className="muted">
@@ -720,13 +593,14 @@ export default function AccountWorkspace({
             {confirmRemove && <RemoveAccountDialog username={state.username} busy={busy} error={error} onCancel={() => setConfirmRemove(false)} onConfirm={() => void action(onRemove)} />}
           </section>
         </div>
+        </SettingsLayout>
       )}
       {tab === 'device' && configLoaded && (
+        <SettingsLayout accountID={accountID} page={tab}>
         <div className="settings device-settings content-surface settings-card">
-          {settingsTabs}
           <section className="device-summary">
             <div>
-              <h2><span className="desktop-title">当前接收账号</span><span className="mobile-title">配对信息</span></h2>
+              <h2>当前接收账号</h2>
               <div className="device-identity">
                 <h3>{state.username ? `@${state.username}` : '待验证账号'}</h3>
                 <span
@@ -736,12 +610,11 @@ export default function AccountWorkspace({
                 </span>
               </div>
             </div>
-            <p className="caption"><span className="desktop-title">首次配对时有 {state.initial_unread_count} 条未读。重新配对会保留已有通知的去重记录。</span><span className="mobile-title">首次配对时有 {state.initial_unread_count} 条未读，逐条提醒的结果可在推送历史查看。</span></p>
+            <p className="caption">首次配对时有 {state.initial_unread_count} 条未读。重新配对会保留已有通知的去重记录。</p>
             <a className="button primary" href={href('pushTest')}>
               发送测试推送
             </a>
           </section>
-          <AssistantConnection onExpired={onExpired} />
           <section className="panel">
             <div className="section-heading">
               <h2>{pairingBlocked ? '重新配对接收设备' : relayReady ? '更换接收设备' : '配对接收设备'}</h2>
@@ -793,22 +666,26 @@ export default function AccountWorkspace({
             {(!state.verified || state.auth_blocked) && (
               <p className="notice">请先在「账号凭据」中保存有效的 V2EX Token，账号验证通过后即可配对。</p>
             )}
-            <div className="device-token-row"><SecretField label="推送发送 Token（配对后自动生成）" value={relayToken} readOnly disabled={busy || configLoading} placeholder="配对后自动生成" /><div className="service-address"><span>固定推送服务</span><p>{pushServiceURL}</p></div></div>
+            <details className="technical-details device-technical"><summary>发送凭据与服务地址</summary><div className="device-token-row"><SecretField label="推送发送 Token（配对后自动生成）" value={relayToken} readOnly disabled={busy || configLoading} placeholder="配对后自动生成" /><div className="service-address"><span>固定推送服务</span><p>{pushServiceURL}</p></div></div></details>
           </section>
+          <AssistantConnection onExpired={onExpired} />
         </div>
+        </SettingsLayout>
       )}
       {tab === 'credentials' && configLoaded && (
+        <SettingsLayout accountID={accountID} page={tab}>
         <form className="settings credential-editor content-surface" onSubmit={save}>
           <section className="credential-fields"><SecretField label="个人 API Token" value={draft.api_token} disabled={busy || configLoading} placeholder="粘贴 Personal Access Token" onChange={value => setDraft({...draft, api_token:value})} /><p className="caption">最近验证 {time(state.token_checked_at)} · {state.token_issue ? '需要更新' : state.verified ? '已验证' : '等待验证'}</p>
           <SecretField label="网页 Cookie" value={draft.cookie} maxLength={16384} disabled={busy || configLoading} placeholder="A2=…; 其他 Cookie…" onChange={value => setDraft({...draft,cookie:value})} /><p className="caption">最近验证 {time(state.cookie_checked_at)} · {state.cookie_issue ? '需要更新' : config.cookie_configured ? '已配置' : '尚未配置'}</p></section>
-          <div className="notice credential-notice"><Icon name="check_circle" /><div><div className="desktop-title"><strong>使用同一个 V2EX 账号</strong><p>Token 与 Cookie 的用户名必须完全一致。不能用其他账号的 Token 覆盖当前配置。</p></div><span className="mobile-title">两项必须属于同一个账号。<br />留空保留原值，更新后重新验证。</span></div></div>
-          <div className="save-bar"><p className="caption">留空保留原值；更新后重新验证。</p><a className="button" href={href('settings')}>取消</a><button className="primary" disabled={busy || configLoading}>{busy ? '正在保存…' : <><span className="desktop-title">保存账号凭据</span><span className="mobile-title">保存凭据</span></>}</button></div>
-          <section className="credential-help"><h2>获取凭据</h2><div className="desktop-title"><TokenHelp /><p className="caption">Cookie：复制已登录浏览器的完整 Cookie 请求头，需包含 A2。</p></div><div className="mobile-title"><p className="caption">Token 选择 Everything 权限，建议有效期 180 天。Cookie 需包含 A2。</p><a className="text-link credential-help-link" href="https://v2ex.com/settings/tokens" target="_blank" rel="noopener noreferrer">前往 V2EX 生成 Token ↗</a></div><details className="technical-details"><summary>凭据检查与隐私说明</summary><p className="caption">Token 用于访问官方 API；Cookie 仅用于读取首页未读数，不执行已读操作，也不发送给推送服务。读取失败时暂停本轮提醒，缺失计数不会当作 0。没有通知 API 请求时，每 24 小时额外检查一次 Token。</p></details></section>
+          <div className="notice credential-notice"><Icon name="check_circle" /><div><div className="credential-copy"><strong>使用同一个 V2EX 账号</strong><p>Token 与 Cookie 的用户名必须完全一致。不能用其他账号的 Token 覆盖当前配置。</p></div></div></div>
+          <div className="save-bar"><p className="caption">留空保留原值；更新后重新验证。</p><a className="button" href={href('settings')}>取消</a><ParticleButton type="submit" status={busy ? 'pending' : 'idle'} disabled={busy || configLoading}>保存账号凭据</ParticleButton></div>
+          <section className="credential-help"><h2>获取凭据</h2><div className="credential-copy"><TokenHelp /><p className="caption">Cookie：复制已登录浏览器的完整 Cookie 请求头，需包含 A2。</p></div><details className="technical-details"><summary>凭据检查与隐私说明</summary><p className="caption">Token 用于访问官方 API；Cookie 仅用于读取首页未读数，不执行已读操作，也不发送给推送服务。读取失败时暂停本轮提醒，缺失计数不会当作 0。没有通知 API 请求时，每 24 小时额外检查一次 Token。</p></details></section>
         </form>
+        </SettingsLayout>
       )}
       {tab === 'sync' && configLoaded && (
+        <SettingsLayout accountID={accountID} page={tab}>
         <form className="settings sync-settings content-surface settings-card" onSubmit={save}>
-          {settingsTabs}
           <section className="panel">
             <h2>同步与上报</h2>
             <label className="switch-row">
@@ -840,12 +717,12 @@ export default function AccountWorkspace({
                 onBlur={(e) => setDraft(current => ({ ...current, interval_seconds: Math.max(30, Number(e.target.value) || 30) }))}
               />
             </label>
-            <p className="caption"><span className="desktop-title">仅在允许推送时段内生效。范围 30–86400 秒；额度不足时自动延长，冷却与错误退避仍然生效。</span><span className="mobile-title">范围 30–86400 秒，额度不足时自动延长。</span></p>
+            <p className="caption">仅在允许推送时段内生效。范围 30–86400 秒；额度不足时自动延长，冷却与错误退避仍然生效。</p>
           </section>
           <section className="panel sync-proxy">
             <a className="setting-row" href={href('proxy')}>
               <div>
-                <strong><span className="desktop-title">当前使用的连接方式</span><span className="mobile-title">网络代理</span></strong>
+                <strong>当前使用的连接方式</strong>
                 <small>
                   {
                     { environment: '环境变量代理', direct: '直接连接', custom: '自定义 HTTP / HTTPS 代理' }[
@@ -859,11 +736,10 @@ export default function AccountWorkspace({
           </section>
           <div className="save-bar">
             <p className="caption">仅对当前账号生效；保存后按 UTC+8 执行。</p>
-            <button className="primary" disabled={busy || configLoading}>
-              {busy ? '正在保存…' : '保存同步偏好'}
-            </button>
+            <ParticleButton type="submit" status={busy ? 'pending' : 'idle'} disabled={busy || configLoading}>保存同步偏好</ParticleButton>
           </div><div className="sync-footer"><p className="caption">当前共享额度 {state.quota.remaining} / {state.quota.limit}；窗口结束 {time(state.quota.reset)}。</p><a className="text-link" href={href('runtime')}>查看运行详情</a></div>
         </form>
+        </SettingsLayout>
       )}
 
       {tab === 'proxy' && configLoaded && (
@@ -968,7 +844,7 @@ export default function AccountWorkspace({
               )}
             </section>
           )}
-          <div className="save-bar"><p className="caption">保存后下一次请求生效，已有冷却和额度等待继续保留。</p><button type="submit" className="primary" disabled={busy}>保存代理设置</button></div>
+          <div className="save-bar"><p className="caption">保存后下一次请求生效，已有冷却和额度等待继续保留。</p><ParticleButton type="submit" status={busy ? 'pending' : 'idle'} pendingLabel="正在处理…" disabled={busy}>保存代理设置</ParticleButton></div>
           <section className="proxy-help"><h2>其他连接方式</h2><p className="caption">环境变量模式读取 HTTP_PROXY、HTTPS_PROXY、NO_PROXY；直连模式忽略这些设置。当前连接方式用于 V2EX 与推送服务。</p></section>
         </form>
       )}
@@ -1026,39 +902,6 @@ export default function AccountWorkspace({
           </section>
         </>
       )}
-    </>
-  )
-}
-
-function NotificationList({ items, grouped = false }: { items: Snapshot['notifications']; grouped?: boolean }) {
-  if (!items.length) return <p className="empty">目前还没有同步到通知。启用同步后，助手会按检查计划自动更新。</p>
-  const byDate: Record<string, Snapshot['notifications']> = {}
-  for (const item of items) {
-    const day = grouped
-      ? formatTime(item.created, false).split(' ')[0]
-      : ''
-    ;(byDate[day] ??= []).push(item)
-  }
-  return (
-    <>
-      {Object.entries(byDate).map(([day, records]) => (
-        <div key={day} className="notification-group">
-          {day && <h2 className="date-heading">{day}</h2>}
-          <ul className={`notification-list ${grouped ? 'with-icons' : ''}`}>
-            {records.map((n) => (
-              <li key={n.id}>
-                {grouped && <Icon name="notification" />}
-                <div>
-                  <h3>{n.title || 'V2EX 提醒'}</h3>
-                  <time>{grouped ? formatTime(n.created, false).split(' ').slice(1).join(' ') : formatTime(n.created, false)}</time>
-                </div>
-                {n.body && <p>{n.body}</p>}
-                {grouped && <small>通知 #{n.id}</small>}
-              </li>
-            ))}
-          </ul>
-        </div>
-      ))}
     </>
   )
 }

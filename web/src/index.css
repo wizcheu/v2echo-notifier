@@ -1,0 +1,84 @@
+@layer theme, base, components, utilities;
+
+/* Keep the existing element styles; do not introduce Tailwind's global reset. */
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "./style.css" layer(components);
+@import "./styles/shell.css" layer(components);
+@import "./styles/workspace.css" layer(components);
+@import "./styles/records.css" layer(components);
+@import "./styles/dashboard.css" layer(components);
+@import "./styles/responsive.css" layer(components);
+
+/* Match the application's existing system-driven dark mode. */
+@custom-variant dark (@media (prefers-color-scheme: dark));
+
+@theme inline {
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-heading: var(--font-sans);
+  --color-background: var(--bg);
+  --color-foreground: var(--fg);
+  --color-card: var(--surface);
+  --color-card-foreground: var(--fg);
+  --color-popover: var(--surface);
+  --color-popover-foreground: var(--fg);
+  --color-primary: var(--accent);
+  --color-primary-foreground: var(--ink-on-accent);
+  --color-secondary: var(--surface2);
+  --color-secondary-foreground: var(--fg);
+  /* Existing --muted is text ink and --accent is the brand color. */
+  --color-muted: var(--surface2);
+  --color-muted-foreground: var(--muted);
+  --color-accent: var(--tint);
+  --color-accent-foreground: var(--accent-ink);
+  --color-destructive: var(--danger);
+  --color-destructive-foreground: var(--ink-on-accent);
+  --color-border: var(--border);
+  --color-input: var(--border);
+  --color-ring: var(--accent);
+  --color-chart-1: var(--accent);
+  --color-chart-2: var(--success);
+  --color-chart-3: var(--warning);
+  --color-chart-4: var(--danger);
+  --color-chart-5: var(--muted);
+  --color-sidebar: var(--sidebar-bg);
+  --color-sidebar-foreground: var(--fg);
+  --color-sidebar-primary: var(--accent);
+  --color-sidebar-primary-foreground: var(--ink-on-accent);
+  --color-sidebar-accent: var(--tint);
+  --color-sidebar-accent-foreground: var(--accent-ink);
+  --color-sidebar-border: var(--border);
+  --color-sidebar-ring: var(--accent);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/* Also support components that reference shadcn variables directly. */
+@layer theme {
+  :root {
+    --background: var(--bg);
+    --foreground: var(--fg);
+    --card: var(--surface);
+    --card-foreground: var(--fg);
+    --popover: var(--surface);
+    --popover-foreground: var(--fg);
+    --primary: var(--accent);
+    --primary-foreground: var(--ink-on-accent);
+    --secondary: var(--surface2);
+    --secondary-foreground: var(--fg);
+    --muted-foreground: var(--muted);
+    --accent-foreground: var(--accent-ink);
+    --destructive: var(--danger);
+    --destructive-foreground: var(--ink-on-accent);
+    --input: var(--border);
+    --ring: var(--accent);
+    --radius: var(--control-radius);
+  }
+}

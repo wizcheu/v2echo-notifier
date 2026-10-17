@@ -1,3 +1,6 @@
+import Select from './components/app/Select'
+import ParticleButton from './components/kokonutui/particle-button'
+import EmptyState from './components/app/EmptyState'
 import { useState } from 'react'
 import type { PushHistoryItem } from './PushHistory'
 import { deliveryDetail } from './deliveryDetail'
@@ -78,20 +81,20 @@ export default function PushTest({
     <div className="settings push-test content-surface">
       <section className="panel">
         <label className="test-kind">测试类型
-          <select value={kind} disabled={busy || pending} onChange={event => setKind(event.target.value)}>
+          <Select value={kind} disabled={busy || pending} onChange={event => setKind(event.target.value)}>
             <option value="">连通性测试</option>
             {(state.samples ?? []).map(item => <option key={item.kind} value={item.kind}>{item.label}</option>)}
-          </select>
+          </Select>
         </label>
         <div className="test-composer">
           <div className="push-preview">
             <span className="preview-app">
-              本次测试消息
+              <Icon name="notification" /> 本次测试消息
             </span>
             {sample && <img className="push-avatar" src={sample.avatar_url} alt="指定测试头像" referrerPolicy="no-referrer" />}
             <h3>{sample?.title ?? (username ? `@${username}` : '@用户名')}</h3>
             <p>{sample?.body ?? pushTestBody}</p>
-            {sample && <p className="caption">虚构用户与文案，使用指定公开测试头像。标题与正文加密传输；新版 iOS 解密后以通讯通知突出头像，以「用户名＋动作」作为显示名称生成主标题，正文保留具体内容。旧版 App 或密钥不可用时显示通用提醒。</p>}
+            <p className="caption">消息内容预览，实际排版与显示由系统决定。</p>
           </div>
           <div className="test-prerequisites" aria-label="发送条件">
             <h2>发送条件</h2>
@@ -108,6 +111,7 @@ export default function PushTest({
             <button className="text-button" onClick={onSettings}>连接设置</button>
           </div>
         </div>
+        {sample && <details className="sample-explanation"><summary>测试样例与加密说明</summary><p className="caption">虚构用户与文案，使用指定公开测试头像。标题与正文加密传输；新版 iOS 解密后以通讯通知突出头像，以「用户名＋动作」作为显示名称生成主标题，正文保留具体内容。旧版 App 或密钥不可用时显示通用提醒。</p></details>}
         {!ready && (
           <div className="notice test-notice">
             <span>{reason}</span>
@@ -117,9 +121,9 @@ export default function PushTest({
           </div>
         )}
         <div className="test-actions">
-          <button className="primary" type="button" disabled={busy || !ready || cooling || pending} onClick={() => onSend(kind)}>
-            {resting ? '休息时段，暂不测试' : busy ? '正在提交…' : pending ? '等待测试结果' : cooling ? '测试冷却中' : '发送测试推送'}
-          </button>
+          <ParticleButton type="button" status={busy ? 'pending' : 'idle'} pendingLabel="正在提交…" disabled={busy || !ready || cooling || pending} onClick={() => onSend(kind)} icon={<Icon name="send_plane" />}>
+            {resting ? '休息时段，暂不测试' : pending ? '等待测试结果' : cooling ? '测试冷却中' : '发送测试推送'}
+          </ParticleButton>
           <p className="caption">每 30 秒可创建一次；上一条未结束时需等待。</p>
         </div>
 
@@ -142,7 +146,7 @@ export default function PushTest({
           )}
         </div>
         {!latest ? (
-          <p className="empty">还没有测试记录。配对完成后，发送一条测试推送确认连接。</p>
+          <EmptyState icon="send_plane" title="还没有测试记录" description="配对完成后，发送一条测试推送确认连接。" />
         ) : (
           <>
             <p role="status">{deliveryDetail(latest)}</p>

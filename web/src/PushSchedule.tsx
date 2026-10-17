@@ -56,7 +56,7 @@ export default function PushScheduleFields({ value, disabled, paused, onChange }
         <div className="schedule-ticks" aria-hidden="true"><span>00:00</span><span>08:00</span><span>16:00</span><span>24:00</span></div>
       </div>}
     </fieldset>
-    <p className="caption" id="schedule-help">{paused ? '同步已暂停；已保存的时段会保留，到点不会自动启用同步。' : '灰色为休息时段，紫色为允许推送时段。到达开始时间自动恢复；24:00 表示当天结束。'}</p>
+    <p className="caption" id="schedule-help">{paused ? '同步已暂停；已保存的时段会保留，到点不会自动启用同步。' : '灰色为休息时段，高亮区域为允许推送时段。到达开始时间自动恢复；24:00 表示当天结束。'}</p>
     <details className="technical-details schedule-rules"><summary>休息期间会暂停哪些任务？</summary><p className="caption">自动网页检查、API 检查、凭据巡检和推送服务通信都会暂停；立即检查与测试推送也不可用。查看记录和编辑设置不受影响，时段跳过不生成检查记录。</p><p className="caption">恢复后先检查最新未读，再决定是否推送；原有额度、冷却、错误退避和事件有效期继续生效。已提交的消息无法撤回，设备可能稍后才显示。</p><p className="caption">每天重复一个时段，按固定 UTC+8 执行，不随浏览器或服务器时区变化。结束早于开始表示次日；全天运行请明确选择「全天运行」。</p></details>
   </section>
 }

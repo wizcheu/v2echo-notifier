@@ -28,6 +28,26 @@ npm run dev
 
 Vite 把 `/api` 与 `/browser-desktop/`（含 WebSocket）代理到本地 Go 服务。React 构建产物通过 `go:embed` 打入正式可执行文件；修改前端后重新执行 `make build`。
 
+## UI 组件
+
+管理页已配置 Tailwind CSS 4、shadcn/ui 与 Kokonut UI；注册表和路径别名定义在 `web/components.json`。在 `web/` 目录安装组件：
+
+```sh
+npx shadcn@latest add @kokonutui/<name>
+```
+
+组件清单见 [Kokonut UI](https://kokonutui.com/llms.txt)。组件安装到 `web/src/components/kokonutui/`，共用类名合并函数为 `web/src/lib/utils.ts`；安装后的源码可直接修改。
+
+管理页以黑白中性色、细边框和轻量动效建立统一层级。全局使用顶部导航；手机通过同一导航的展开菜单进入全部功能，不再维护一套底部导航。概览以未读快照、通知收件箱为主，运行与连接状态置于侧列；凭据、设备、同步偏好共用独立设置导航。文案和状态始终来自真实数据，不使用示例统计或把 APNs 已接收描述成设备已送达。
+
+样式入口为 `web/src/index.css`，不加载 Tailwind 全局重置。`style.css` 定义语义颜色、字体与基础控件；`styles/shell.css` 管理导航和登录，`workspace.css` 管理表单与账号，`records.css` 管理列表与详情，`dashboard.css` 管理概览，`responsive.css` 管理响应布局。样式放在 `components` 层，显式工具类可覆盖默认值。`dark:` 跟随系统外观；`--muted` 表示文字色、`--accent` 表示主要操作色，与 shadcn 的同名表面角色不同，使用已映射的 `text-muted-foreground`、`bg-muted`、`bg-accent` 等工具类。
+
+通过 CLI 安装的 Kokonut `particle-button` 与 `loader` 已适配语义令牌、中文和系统减少动态效果设置。提交按钮使用受控 `status`，跟随请求状态，成功与失败由现有业务消息展示；不把普通点击当作成功。粒子默认关闭。设置与筛选共用 `SegmentedNavigation`，选中指示器由 Motion 过渡；减少动态效果时立即切换。
+
+`Dashboard.tsx` 负责概览呈现，`SettingsLayout.tsx` 负责设置区结构，`NotificationList.tsx` 共用通知列表。账号请求、独立草稿、配对、队列和业务门控仍集中在原工作区；工作区按需加载，登录页不会提前载入配对二维码等模块。
+
+Codex 可通过 `npx shadcn@latest mcp init --client codex` 配置 shadcn MCP，并按命令提示更新本机配置后重启。MCP 项目查询使用 `web/` 的绝对路径。
+
 ## 验证
 
 ```sh
@@ -45,7 +65,7 @@ npm run build
 npm run test:browser
 ```
 
-浏览器测试默认使用本机 Chrome，所有 API 均由合成数据替代，不访问真实账号或发送推送。
+浏览器测试默认使用本机 Chrome，所有 API 均由 `web/tests/fixture.ts` 的合成数据替代，不访问真实账号或发送推送。`layout.spec.ts` 覆盖 320、390、820、1440px 的浅深色页面、菜单、提交中与失败、登录、空态、首次连接和移除确认；390px / 1440px 的页面截图输出到 `web/test-results/`，便于逐页视觉复核。截图是合成数据的本地浏览器验收，不代表真实设备或推送服务联调。
 
 ## 发布容器镜像
 
@@ -56,10 +76,14 @@ npm run test:browser
 | 参数 | 用途 |
 | --- | --- |
 | 构建组件 `component` | 默认 `notifier`；选择 `browser` 只构建浏览器镜像，选择 `all` 构建两者 |
-| 镜像标签 `image_tag` | 默认 `edge`；可填 `0.1.0` 等版本号，也可直接填 `latest` |
+| 镜像版本号 `image_tag` | 默认 `edge`；可填 `0.1.0` 等版本号，也可直接填 `latest`；同时作为镜像标签和网页显示版本 |
 | 同时更新 latest `publish_latest` | 默认关闭；勾选后会在填写的标签之外发布 `latest` |
 
 例如：填写 `0.1.0` 并勾选同时更新 latest，会发布 `:0.1.0`、`:latest` 和用于追溯提交的 `:sha-*`；沿用默认参数只发布 `:edge` 和 `:sha-*`。手动填写的镜像版本号不会自动创建 Git 标签或 GitHub Release。准备正式提供给用户的构建才更新 `latest`。
+
+登录页与登录后的页面底部均显示构建版本和短提交号，例如 `版本 0.1.0 · abc1234`。版本号在构建时写入网页资源及镜像的 `org.opencontainers.image.version` 标签；即使通过 `latest` 拉取，网页仍显示本次填写的 `0.1.0`。Git 标签触发时取去掉开头 `v` 的版本号；例如 `v0.2.0-rc.1` 显示为 `0.2.0-rc.1`。`edge` / `latest` 构建可用提交号区分，工作流摘要也列出完整提交号。
+
+本地 `npm run dev` / `npm run build` 默认显示 `web/package.json` 的版本加 `-dev`，不自动推断已发布版本。可通过 `VITE_APP_VERSION=0.1.0 VITE_APP_REVISION=<提交号> npm run build` 显式指定；这些值属于公开构建信息。Docker 对应参数为 `APP_VERSION` / `APP_REVISION`，详见[源码构建](deployment.md#从源码构建)。修改容器的运行时环境变量不会改变已编译的网页版本。
 
 只发布 browser 时，选择 `component=browser`、`image_tag=edge`，保持 `publish_latest` 关闭。本仓库会生成 `ghcr.io/wizcheu/v2echo-notifier-browser:edge`，不会构建或更新 notifier；部署时通过 `ECHO_BROWSER_IMAGE` 选择该标签。首次配套发布可选择 `component=all`，同时构建两个镜像。Fork 仓库时，镜像地址随仓库所有者和仓库名变化。
 
@@ -77,7 +101,7 @@ npm run test:browser
 - 设置子页：`settings/credentials`、`settings/device`、`settings/sync`；运行详情：`overview/runtime`。
 - 账号管理：`/#/accounts`；添加账号：`/#/accounts/new`。
 
-浏览器前进、后退和刷新会恢复账号与页面。推送历史的搜索、状态、分页及详情页也保存在 Hash 查询参数中。登录后返回原链接；已移除账号的链接显示提示，不会自动打开另一账号的配置。
+浏览器前进、后退和刷新会恢复账号与页面。推送历史的搜索、状态、分页及当前详情保存在 Hash 查询参数中；详情以模态弹窗展示，可刷新或复制链接继续查看，关闭后保留列表位置与筛选。登录后返回原链接；已移除账号的链接显示提示，不会自动打开另一账号的配置。
 
 凭据与同步偏好分别保存，同一账号的工作台页面间切换会保留尚未保存的草稿；刷新、切换账号或进入账号管理会丢弃草稿。管理密钥、Token 和 Cookie 不写入 URL 或浏览器本地存储。
 

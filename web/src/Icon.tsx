@@ -35,15 +35,13 @@ const paths: Record<string, string[]> = {
   close: [
     'm12 13.414 5.657 5.657a1 1 0 0 0 1.414-1.414L13.414 12l5.657-5.657a1 1 0 0 0-1.414-1.414L12 10.586 6.343 4.929A1 1 0 0 0 4.93 6.343L10.586 12l-5.657 5.657a1 1 0 1 0 1.414 1.414z',
   ],
-  exit: [
-    'm14.707 5.636 5.657 5.657a1 1 0 0 1 0 1.414l-5.657 5.657a1 1 0 0 1-1.414-1.414l3.95-3.95H4a1 1 0 1 1 0-2h13.243l-3.95-3.95a1 1 0 1 1 1.414-1.414Z',
-  ],
+  down: ['M12.707 15.707a1 1 0 0 1-1.414 0L5.636 10.05A1 1 0 1 1 7.05 8.636l4.95 4.95 4.95-4.95a1 1 0 0 1 1.414 1.414l-5.657 5.657Z'],
   menu: ['M5 10a2 2 0 1 1 0 4 2 2 0 0 1 0-4m7 0a2 2 0 1 1 0 4 2 2 0 0 1 0-4m7 0a2 2 0 1 1 0 4 2 2 0 0 1 0-4'],
 }
 export default function Icon({ name }: { name: string }) {
   return (
     <svg className="icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
-      {(paths[name] || paths.settings_2).map((d, i) => (
+      {name === 'exit_line' ? <path d="M12 4H7C5.89543 4 5 4.89543 5 6V18C5 19.1046 5.89543 20 7 20H12M12 12H19.5M16.9999 9.17157L19.8284 12L16.9999 14.8284" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /> : (paths[name] || paths.settings_2).map((d, i) => (
         <path key={i} d={d} />
       ))}
     </svg>

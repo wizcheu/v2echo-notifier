@@ -1,3 +1,4 @@
+import Icon from './Icon'
 import { useEffect, useId, useRef } from 'react'
 
 export default function RemoveAccountDialog({ username, busy, error, onCancel, onConfirm }: {
@@ -7,6 +8,7 @@ export default function RemoveAccountDialog({ username, busy, error, onCancel, o
   const title = useId()
   useEffect(() => { const el = dialog.current!; el.showModal(); return () => el.close() }, [])
   return <dialog ref={dialog} className="remove-dialog" aria-labelledby={title} onCancel={event => {event.preventDefault(); if (!busy) onCancel()}}>
+    <span className="dialog-symbol"><Icon name="lock" /></span>
     <h2 id={title}>移除 {username ? `@${username}` : '此待验证账号'}？</h2>
     <p className="muted">此操作会删除当前服务器保存的该账号数据：</p>
     <p>凭据、通知历史与推送队列。<br />账号的同步与上报也会停止。</p>
