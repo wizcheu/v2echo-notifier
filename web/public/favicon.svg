@@ -9,10 +9,10 @@
 >
   <title id="title">V2Echo app icon</title>
   <desc id="description">
-    A purple rounded V with four violet echo lines on a white background.
+    A purple rounded V with four violet echo lines on a rounded white tile.
   </desc>
 
-  <rect width="1024" height="1024" fill="#FFFFFF" />
+  <rect width="1024" height="1024" rx="224" fill="#FFFFFF" />
 
   <path
     d="M 380 240
