@@ -26,7 +26,7 @@ cd web
 npm run dev
 ```
 
-Vite 把 `/api` 与 `/browser-desktop/`（含 WebSocket）代理到本地 Go 服务。React 构建产物通过 `go:embed` 打入正式可执行文件；修改前端后重新执行 `make build`。
+Vite 把 `/api` 与 `/browser-desktop/`（含 WebSocket）代理到本地 Go 服务。React 构建产物通过 `go:embed` 打入正式可执行文件；需要让可执行文件包含最新前端时重新执行 `make build`，日常修改的验证范围按[验证](#验证)一节选择。
 
 ## UI 组件
 
@@ -50,13 +50,17 @@ Codex 可通过 `npx shadcn@latest mcp init --client codex` 配置 shadcn MCP，
 
 ## 验证
 
+按 [AGENTS.md](../AGENTS.md) 的风险分级执行，以下是按需命令，不是每次修改的必跑清单。纯文档、普通注释 / 格式、展示文案和既有样式参数默认只检查差异；无行为影响的声明整理与已确认无引用 / 副作用的死代码删除同样可跳过编译。业务逻辑运行相关测试，Go 按受影响包执行 `go vet`；前端类型 / 组件结构 / 依赖 / 打包配置变化再运行 build。跨包或集成变化才扩大验证范围，已有有效结果不重复执行。
+
+后端完整测试入口：
+
 ```sh
 make test
 ```
 
 测试使用合成响应和内存 HTTP transport，覆盖历史导入、分页重叠、增量翻页恢复、空历史、Token 失效、账号不匹配、额度退避、上报超时重放、pending 查询、配对重试、连接替换、多账号隔离、共享额度公平调度和配对前通知跳过、Cookie 身份检查、网页汇总原子提交、首条 ID 变化去重、删除与零未读、Cookie 加密及失败恢复。自动化测试不调用真实网络接口；实际账号与推送连接需要单独验证。
 
-前端验证（Node.js 22.18+）：
+前端验证入口（Node.js 22.18+，按变更选择相关测试、构建或浏览器验收，不整段执行）：
 
 ```sh
 cd web
