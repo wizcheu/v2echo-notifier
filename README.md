@@ -128,11 +128,20 @@ browser 启用后需持续运行，后续首页检查会沿用浏览器会话。
 
 ## 文档
 
+### 使用与部署
+
 | 文档 | 内容 |
 | --- | --- |
 | [部署与更新](docs/deployment.md) | 镜像安装、版本更新、代理、管理密钥、数据保存 |
 | [使用指南](docs/user-guide.md) | 账号与凭据、设备配对、网络代理、推送时段、测试与记录 |
+
+### 开发与接口
+
+| 文档 | 内容 |
+| --- | --- |
 | [本地开发](docs/development.md) | 开发环境、编译运行、测试、GitHub Actions 镜像发布 |
 | [同步契约](docs/synchronization.md) | 未读判断、去重、额度、调度与本地管理接口 |
 | [配对接口](docs/pairing.md) | 接收设备配对与发送凭据兑换 |
 | [S2S 协议](docs/s2s-protocol.md) | 事件上报、回执、有效期与预算 |
+
+V2Echo App 的购买条件见[会员协议](https://app.v2echo.com/membership-agreement/)，客户端及推送服务的数据处理见[隐私政策](https://app.v2echo.com/privacy/)。助手的安装与运维说明不代替这些产品文档。
